@@ -5,12 +5,13 @@ import { createClient } from "@/lib/supabase/server";
 import { analyzeSubmission } from "@/lib/submission-analysis";
 import { one } from "@/lib/rel";
 import { fmtValue, fmtDate } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { StatusBadge, SubmitterTypeBadge, SeverityBadge, AgentTag } from "@/components/badges";
 import {
-  CheckCircle2, AlertTriangle, KanbanSquare, MapPin, FileCheck2,
+  CheckCircle2, AlertTriangle, KanbanSquare, MapPin, FileCheck2, ArrowRight,
 } from "lucide-react";
 
 export default async function SubmissionDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -22,6 +23,20 @@ export default async function SubmissionDetail({ params }: { params: Promise<{ i
   const { submission, submitter, currentStage, sectors, indicators, values, validation, anomaly, drafting, crossCutting } = result;
   const findings = [...validation, ...anomaly];
   const flaggedSlugs = new Set(findings.map((f) => f.indicatorSlug).filter(Boolean));
+
+  // Only the owning county officer can jump into the editable form; national
+  // reviewers land here read-only, so their finding rows stay plain text.
+  const canEdit = !isNational(profile.role) && profile.submitter?.id === submission.submitter_id;
+  const sectorSlugById = new Map(sectors.map((s) => [s.id, s.slug]));
+  const indicatorBySlug = new Map(indicators.map((i) => [i.slug, i]));
+  const findingHref = (slug: string | undefined) => {
+    if (!canEdit || !slug) return null;
+    const indicator = indicatorBySlug.get(slug);
+    if (!indicator) return null;
+    const sectorSlug = sectorSlugById.get(indicator.sector_id);
+    if (!sectorSlug) return null;
+    return `/submissions/${id}/${sectorSlug}#ind-${indicator.id}`;
+  };
 
   // approval history
   const supabase = await createClient();
@@ -75,24 +90,44 @@ export default async function SubmissionDetail({ params }: { params: Promise<{ i
                   <CheckCircle2 className="size-4" /> All automated checks passed. No issues found.
                 </div>
               ) : (
-                findings.map((f, i) => (
-                  <div key={i} className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5">
-                    <AlertTriangle
-                      className={
-                        f.severity === "error" ? "size-4 text-danger mt-0.5" : "size-4 text-warning mt-0.5"
-                      }
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm">{f.message}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <SeverityBadge severity={f.severity} />
-                        <span className="text-[11px] text-muted-foreground uppercase tracking-wide">
-                          {f.agent} · {f.ruleCode}
-                        </span>
+                findings.map((f, i) => {
+                  const href = findingHref(f.indicatorSlug);
+                  const row = (
+                    <div
+                      className={cn(
+                        "flex items-start gap-3 rounded-lg border border-border px-3 py-2.5",
+                        href && "transition-colors hover:border-brand hover:bg-muted/50"
+                      )}
+                    >
+                      <AlertTriangle
+                        className={
+                          f.severity === "error" ? "size-4 text-danger mt-0.5" : "size-4 text-warning mt-0.5"
+                        }
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm">{f.message}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <SeverityBadge severity={f.severity} />
+                          <span className="text-[11px] text-muted-foreground uppercase tracking-wide">
+                            {f.agent} · {f.ruleCode}
+                          </span>
+                        </div>
                       </div>
+                      {href && (
+                        <span className="text-xs text-brand inline-flex items-center gap-1 shrink-0 mt-0.5">
+                          Fix it <ArrowRight className="size-3.5" />
+                        </span>
+                      )}
                     </div>
-                  </div>
-                ))
+                  );
+                  return href ? (
+                    <Link key={i} href={href} className="block">
+                      {row}
+                    </Link>
+                  ) : (
+                    <div key={i}>{row}</div>
+                  );
+                })
               )}
             </CardContent>
           </Card>

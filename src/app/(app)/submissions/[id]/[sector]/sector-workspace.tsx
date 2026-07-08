@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
@@ -68,6 +68,26 @@ export function SectorWorkspace({
   }, [rows, values]);
 
   const warningsCount = Object.values(flagged).filter(Boolean).length;
+
+  // Deep-linked from a flagged finding elsewhere (e.g. the review page): jump
+  // to that row, flash it, and put the cursor in its input.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  useEffect(() => {
+    const match = window.location.hash.match(/^#ind-(.+)$/);
+    const targetId = match?.[1];
+    if (!targetId || !rows.some((r) => r.id === targetId)) return;
+    const el = document.getElementById(`ind-${targetId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.querySelector("input")?.focus();
+    const showTimer = setTimeout(() => setHighlightId(targetId), 0);
+    const hideTimer = setTimeout(() => setHighlightId(null), 2500);
+    return () => {
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const commit = (indicatorId: string, unit: string, value: number | null) => {
     if (persisted.current[indicatorId] === value) return;
@@ -143,7 +163,12 @@ export function SectorWorkspace({
                 return (
                   <tr
                     key={r.id}
-                    className={cn("border-b border-border last:border-0", i % 2 === 1 && "bg-muted/25")}
+                    id={`ind-${r.id}`}
+                    className={cn(
+                      "border-b border-border last:border-0 transition-colors duration-500",
+                      i % 2 === 1 && "bg-muted/25",
+                      highlightId === r.id && tone.bgSoft
+                    )}
                   >
                     <td className="px-5 py-2.5 font-medium">{r.name}</td>
                     <td className="px-5 py-2.5">
