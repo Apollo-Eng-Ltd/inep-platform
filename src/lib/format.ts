@@ -43,6 +43,13 @@ export function daysBetween(fromIso: string | null | undefined, toIso: string | 
   return Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 86400000);
 }
 
+/** "H1 2026" / "H2 2025" — derived from a real timestamp, not a stored field. */
+export function halfYearLabel(iso: string): string {
+  const d = new Date(iso);
+  const half = d.getMonth() < 6 ? 1 : 2;
+  return `H${half} ${d.getFullYear()}`;
+}
+
 export function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diff / 60000);

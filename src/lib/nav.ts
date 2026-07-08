@@ -24,6 +24,7 @@ export function navForRole(role: Role): NavGroup[] {
         items: [
           { label: "New submission", href: "/submissions/new", icon: "FilePlus2" },
           { label: "Submissions", href: "/submissions", icon: "FileText" },
+          { label: "History", href: "/history", icon: "History" },
           { label: "Documents", href: "/documents", icon: "FolderClosed" },
           { label: "Public participation", href: "/participation", icon: "MessagesSquare" },
         ],

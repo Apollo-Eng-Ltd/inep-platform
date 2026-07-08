@@ -383,6 +383,34 @@ async function main() {
   );
   await insert("national_summaries", summaryRows);
 
+  // ---- supporting documents ---------------------------------------------------
+  console.log("→ Seeding supporting documents…");
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
+  const documentRows: Record<string, unknown>[] = [];
+  COUNTIES.forEach((c, i) => {
+    const sid = submitterByCode.get(c.code)!.id;
+    const planId = subIdByTitle.get(`${c.name} Energy Plan ${PLAN_YEAR}`);
+    const latestReportId = subIdByTitle.get(`${c.name} Annual Energy Report ${CYCLE_YEARS[CYCLE_YEARS.length - 1]}`);
+    documentRows.push(
+      {
+        submitter_id: sid, submission_id: planId ?? null,
+        file_name: `${c.name} County Energy Feasibility Study.pdf`, storage_path: null,
+        kind: "study", uploaded_by: officerId, created_at: daysAgo(40 + (i % 10)),
+      },
+      {
+        submitter_id: sid, submission_id: latestReportId ?? null,
+        file_name: `${c.name} Energy Budget Annex.xlsx`, storage_path: null,
+        kind: "annex", uploaded_by: officerId, created_at: daysAgo(20 + (i % 7)),
+      },
+      {
+        submitter_id: sid, submission_id: null,
+        file_name: `${c.name} Ward Boundary Map.pdf`, storage_path: null,
+        kind: "map", uploaded_by: officerId, created_at: daysAgo(5 + (i % 5)),
+      }
+    );
+  });
+  await insert("documents", documentRows);
+
   // ---- public comments (ward-aware) -----------------------------------------
   console.log("→ Seeding public comments, agent log, notifications…");
   const makueniPlan = subSeeds.find((s) => s.title.startsWith("Makueni Energy Plan"));
