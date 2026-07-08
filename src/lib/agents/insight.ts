@@ -95,3 +95,49 @@ export function runInsight(input: InsightInput): AgentResponse<InsightOutput> {
     0.88
   );
 }
+
+// ---------------------------------------------------------------------------
+// County-level insight — one plain-English sentence for the officer's home
+// screen, built from that county's own indicator trends. Same rule-based
+// engine, smaller scope: no aggregation, no cross-county comparison.
+
+export interface CountyInsightInput {
+  trends: IndicatorTrend[];
+  openFlags: number;
+}
+
+export interface CountyInsightOutput {
+  text: string;
+}
+
+export function runCountyInsight(input: CountyInsightInput): AgentResponse<CountyInsightOutput> {
+  const { trends, openFlags } = input;
+
+  const withDelta = trends
+    .filter((t) => t.previous !== null && t.previous !== 0)
+    .map((t) => ({ t, d: (t.latest - (t.previous as number)) / (t.previous as number) }));
+
+  let text: string;
+  if (withDelta.length === 0) {
+    text =
+      openFlags > 0
+        ? `${openFlags} open data ${openFlags === 1 ? "flag needs" : "flags need"} a look before this submission moves forward.`
+        : "No prior-year data to compare yet — trends will show once last year's report is on file.";
+  } else {
+    const top = withDelta.reduce((a, b) => (Math.abs(b.d) > Math.abs(a.d) ? b : a));
+    const dir = top.d >= 0 ? "higher" : "lower";
+    const mag = Math.abs(top.d);
+    const magPhrase = mag >= 1 ? `${Math.round(mag + 1)}x` : `${Math.round(mag * 100)}%`;
+    const verb = mag >= 1 ? "are" : "is";
+    text = `Your ${top.t.name.toLowerCase()} ${verb} ${magPhrase} ${dir} than last year.`;
+    if (mag >= 0.4) {
+      text += " Worth double-checking before you submit.";
+    } else if (openFlags > 0) {
+      text += ` There ${openFlags === 1 ? "is" : "are"} also ${openFlags} open data ${openFlags === 1 ? "flag" : "flags"} to review.`;
+    } else {
+      text += " That's in line with a steady reporting trend.";
+    }
+  }
+
+  return respond("insight", { text }, 0.82);
+}

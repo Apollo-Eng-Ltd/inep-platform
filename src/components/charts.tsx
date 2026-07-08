@@ -61,6 +61,51 @@ export function TrendLine({ data, unit }: { data: Point[]; unit?: string }) {
   );
 }
 
+/** Tiny inline bar trend for stat cards — no axes, no tooltip, just a shape. */
+type Tone = "brand" | "warning" | "danger" | "success" | "muted";
+const TONE_VAR: Record<Tone, string> = {
+  brand: "var(--brand)",
+  warning: "var(--warning)",
+  danger: "var(--danger)",
+  success: "var(--success)",
+  muted: "var(--muted-foreground)",
+};
+
+export function MiniBars({
+  values,
+  tone = "brand",
+  tones,
+}: {
+  values: number[];
+  tone?: Tone;
+  /** Optional per-bar tone override, same length as `values`. */
+  tones?: Tone[];
+}) {
+  const max = Math.max(1, ...values.map((v) => Math.abs(v)));
+  const w = 6;
+  const gap = 3;
+  const h = 24;
+  return (
+    <svg width={values.length * (w + gap) - gap} height={h} className="shrink-0">
+      {values.map((v, i) => {
+        const barH = Math.max(2, (Math.abs(v) / max) * h);
+        return (
+          <rect
+            key={i}
+            x={i * (w + gap)}
+            y={h - barH}
+            width={w}
+            height={barH}
+            rx={1.5}
+            fill={TONE_VAR[tones?.[i] ?? tone]}
+            opacity={tones ? 1 : i === values.length - 1 ? 1 : 0.45}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 export function RankBar({ data, unit }: { data: Point[]; unit?: string }) {
   const height = Math.max(200, data.length * 30 + 20);
   return (

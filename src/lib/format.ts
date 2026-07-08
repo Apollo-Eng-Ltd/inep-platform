@@ -24,6 +24,25 @@ export function fmtDate(iso: string | null | undefined): string {
   });
 }
 
+export function daysUntil(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  return Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
+}
+
+export function pctElapsed(startIso: string | null | undefined, endIso: string | null | undefined): number | null {
+  if (!startIso || !endIso) return null;
+  const start = new Date(startIso).getTime();
+  const end = new Date(endIso).getTime();
+  if (end <= start) return null;
+  return Math.min(100, Math.max(0, ((Date.now() - start) / (end - start)) * 100));
+}
+
+/** Whole days from `fromIso` to `toIso`. Pure — no wall-clock read. */
+export function daysBetween(fromIso: string | null | undefined, toIso: string | null | undefined): number | null {
+  if (!fromIso || !toIso) return null;
+  return Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 86400000);
+}
+
 export function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diff / 60000);

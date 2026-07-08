@@ -12,6 +12,7 @@ export { runValidation } from "./validation";
 export { runAnomaly, type AnomalyInput } from "./anomaly";
 export { runAggregation, type AggInputRow, type AggResult } from "./aggregation";
 export { runInsight, type InsightInput, type IndicatorTrend, type InsightOutput } from "./insight";
+export { runCountyInsight, type CountyInsightInput, type CountyInsightOutput } from "./insight";
 export { runDrafting, type DraftingInput, type DraftingOutput } from "./drafting";
 export { runCrossCutting, type CrossCuttingInput, type Dimension, type DimensionScore } from "./crossCutting";
 export { runCompliance, nextReviewDate, type ComplianceInput, type ComplianceItem } from "./compliance";
@@ -21,7 +22,7 @@ export { runPublicEngagement, type CommentInput, type ReplyOutput } from "./publ
 import { runValidation } from "./validation";
 import { runAnomaly } from "./anomaly";
 import { runAggregation } from "./aggregation";
-import { runInsight } from "./insight";
+import { runInsight, runCountyInsight } from "./insight";
 import { runDrafting } from "./drafting";
 import { runCrossCutting } from "./crossCutting";
 import { runCompliance } from "./compliance";
@@ -47,6 +48,7 @@ export const agents = {
   runAnomaly,
   runAggregation,
   runInsight,
+  runCountyInsight,
   runDrafting,
   runCrossCutting,
   runCompliance,
