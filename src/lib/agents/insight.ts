@@ -141,3 +141,74 @@ export function runCountyInsight(input: CountyInsightInput): AgentResponse<Count
 
   return respond("insight", { text }, 0.82);
 }
+
+// ---------------------------------------------------------------------------
+// Sector-level insight — one sentence for the sector form screen, comparing
+// this county's year-on-year movement against the national average for the
+// same indicator where that comparison is available (national_summaries).
+
+export interface SectorInsightRow {
+  name: string;
+  latest: number | null;
+  previous: number | null;
+  nationalLatest: number | null;
+  nationalPrevious: number | null;
+}
+
+export interface SectorInsightInput {
+  sectorName: string;
+  rows: SectorInsightRow[];
+}
+
+export interface SectorInsightOutput {
+  text: string;
+}
+
+export function runSectorInsight(input: SectorInsightInput): AgentResponse<SectorInsightOutput> {
+  const { sectorName, rows } = input;
+
+  const comparable = rows.filter(
+    (r) =>
+      r.latest != null &&
+      r.previous != null &&
+      r.previous !== 0 &&
+      r.nationalLatest != null &&
+      r.nationalPrevious != null &&
+      r.nationalPrevious !== 0
+  );
+
+  let text: string;
+  if (comparable.length > 0) {
+    const scored = comparable.map((r) => {
+      const countyChange = (r.latest! - r.previous!) / r.previous!;
+      const nationalChange = (r.nationalLatest! - r.nationalPrevious!) / r.nationalPrevious!;
+      return { r, countyChange, nationalChange, gap: countyChange - nationalChange };
+    });
+    const top = scored.reduce((a, b) => (Math.abs(b.gap) > Math.abs(a.gap) ? b : a));
+    const countyPct = Math.round(top.countyChange * 100);
+    const nationalPct = Math.round(top.nationalChange * 100);
+
+    if (Math.abs(top.gap) < 0.03) {
+      text = `${top.r.name} is moving in line with the national trend — up ${countyPct}% here and ${nationalPct}% nationally.`;
+    } else if (top.gap > 0) {
+      text = `${top.r.name} is rising faster here than the national average — ${countyPct}% versus ${nationalPct}% nationally.`;
+    } else {
+      text = `${top.r.name} is behind the national pace — ${countyPct}% here versus ${nationalPct}% nationally.`;
+    }
+  } else {
+    const withTrend = rows.filter((r) => r.latest != null && r.previous != null && r.previous !== 0);
+    if (withTrend.length > 0) {
+      const top = withTrend.reduce((a, b) =>
+        Math.abs((b.latest! - b.previous!) / b.previous!) > Math.abs((a.latest! - a.previous!) / a.previous!)
+          ? b
+          : a
+      );
+      const pct = Math.round(((top.latest! - top.previous!) / top.previous!) * 100);
+      text = `${top.name} is ${pct >= 0 ? "up" : "down"} ${Math.abs(pct)}% versus last year.`;
+    } else {
+      text = `Fill in this year's numbers to see how ${sectorName.toLowerCase()} is trending.`;
+    }
+  }
+
+  return respond("insight", { text }, 0.8);
+}

@@ -62,11 +62,19 @@ async function ensureDraftPlan(): Promise<string> {
   return created.id;
 }
 
-/** "Start with the form" / "Continue with the form" — goes straight to the draft. */
+/** "Start with the form" / "Continue with the form" — goes straight to the draft's first sector. */
 export async function startOrContinueSubmission() {
   const id = await ensureDraftPlan();
+  const supabase = await createClient();
+  const { data: firstSector } = await supabase
+    .from("sectors")
+    .select("slug")
+    .order("sort_order")
+    .limit(1)
+    .maybeSingle();
+
   revalidatePath("/submissions/new");
-  redirect(`/submissions/${id}`);
+  redirect(firstSector ? `/submissions/${id}/${firstSector.slug}` : `/submissions/${id}`);
 }
 
 /** Parses an uploaded template (.csv) and writes matched rows onto the draft. */

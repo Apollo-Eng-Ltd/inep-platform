@@ -106,6 +106,46 @@ export function MiniBars({
   );
 }
 
+/** Small circular completion ring — live-friendly (the stroke animates on change). */
+export function RingProgress({
+  pct,
+  size = 40,
+  strokeWidth = 4,
+  toneVar = "var(--brand)",
+}: {
+  pct: number;
+  size?: number;
+  strokeWidth?: number;
+  toneVar?: string;
+}) {
+  const r = (size - strokeWidth) / 2;
+  const c = 2 * Math.PI * r;
+  const clamped = Math.max(0, Math.min(100, pct));
+  const offset = c - (clamped / 100) * c;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="var(--muted)" strokeWidth={strokeWidth} fill="none" />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke={toneVar}
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 300ms ease" }}
+        />
+      </svg>
+      <span className="absolute inset-0 grid place-items-center text-[10px] font-medium tabular-nums">
+        {Math.round(clamped)}%
+      </span>
+    </div>
+  );
+}
+
 export function RankBar({ data, unit }: { data: Point[]; unit?: string }) {
   const height = Math.max(200, data.length * 30 + 20);
   return (
