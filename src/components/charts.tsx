@@ -3,9 +3,10 @@
 // Small, quiet charts for the dashboard. Single-series by design: the card
 // title names the series, so no legend is needed. Marks are thin, grid is
 // recessive, every chart has a hover tooltip. Colors come from design tokens.
+import { useId } from "react";
 import {
-  ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, Cell, LabelList,
+  ResponsiveContainer, LineChart, Line, BarChart, Bar, AreaChart, Area,
+  PieChart, Pie, XAxis, YAxis, CartesianGrid, Tooltip, Cell, LabelList,
 } from "recharts";
 
 const AXIS = "var(--muted-foreground)";
@@ -189,6 +190,219 @@ export function RingProgress({
         {Math.round(clamped)}%
       </span>
     </div>
+  );
+}
+
+/** Small hero-card chart — gradient fill "pooling" under the line. No axes. */
+export function GradientArea({
+  data,
+  tone = "brand",
+  height = 56,
+}: {
+  data: number[];
+  tone?: Tone;
+  height?: number;
+}) {
+  const rid = useId().replace(/[:]/g, "");
+  const color = TONE_VAR[tone];
+  const points = data.map((v, i) => ({ i, v }));
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={points} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+        <defs>
+          <linearGradient id={`grad-${rid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.4} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <Area
+          type="monotone"
+          dataKey="v"
+          stroke={color}
+          strokeWidth={2}
+          fill={`url(#grad-${rid})`}
+          isAnimationActive={false}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+function MultiTooltipBox({
+  active,
+  payload,
+  label,
+  unit,
+}: {
+  active?: boolean;
+  payload?: { name?: string; value?: number; color?: string }[];
+  label?: string;
+  unit?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md space-y-1 max-w-56">
+      <p className="font-medium">{label}</p>
+      {payload.map((p, i) => (
+        <p key={i} className="flex items-center gap-1.5">
+          <span className="inline-block size-2 rounded-full shrink-0" style={{ background: p.color }} />
+          <span className="text-muted-foreground truncate">{p.name}</span>
+          <span className="font-medium tabular-nums ml-auto">
+            {(p.value ?? 0).toLocaleString("en-KE")}
+            {unit === "%" ? "%" : ""}
+          </span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+export interface AreaSeriesDef {
+  key: string;
+  label: string;
+  color: string;
+}
+
+/** Large multi-county comparison chart — layered gradient fills, one per series. */
+export function MultiCountyArea({
+  data,
+  series,
+  unit,
+}: {
+  data: Record<string, number | string>[];
+  series: AreaSeriesDef[];
+  unit?: string;
+}) {
+  const rid = useId().replace(/[:]/g, "");
+  return (
+    <ResponsiveContainer width="100%" height={360}>
+      <AreaChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
+        <defs>
+          {series.map((s) => (
+            <linearGradient key={s.key} id={`ma-${rid}-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={s.color} stopOpacity={0.32} />
+              <stop offset="100%" stopColor={s.color} stopOpacity={0} />
+            </linearGradient>
+          ))}
+        </defs>
+        <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="label" stroke={AXIS} fontSize={12} tickLine={false} axisLine={false} />
+        <YAxis stroke={AXIS} fontSize={12} tickLine={false} axisLine={false} width={44} />
+        <Tooltip content={<MultiTooltipBox unit={unit} />} cursor={{ stroke: GRID }} />
+        {series.map((s) => (
+          <Area
+            key={s.key}
+            type="monotone"
+            dataKey={s.key}
+            name={s.label}
+            stroke={s.color}
+            strokeWidth={2}
+            fill={`url(#ma-${rid}-${s.key})`}
+            dot={{ r: 2.5, fill: s.color, strokeWidth: 0 }}
+            activeDot={{ r: 4 }}
+          />
+        ))}
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Ranked horizontal bars, colored on a gradient from top performer to bottom. */
+export function GradientRankBar({ data, unit }: { data: Point[]; unit?: string }) {
+  const height = Math.max(220, data.length * 26 + 20);
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} layout="vertical" margin={{ top: 0, right: 44, bottom: 0, left: 8 }}>
+        <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
+        <XAxis type="number" hide />
+        <YAxis type="category" dataKey="label" stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={104} />
+        <Tooltip content={<TooltipBox unit={unit} />} cursor={{ fill: "var(--muted)" }} />
+        <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={14} isAnimationActive={false}>
+          {data.map((_, i) => {
+            const t = data.length > 1 ? i / (data.length - 1) : 0;
+            return (
+              <Cell
+                key={i}
+                fill={`color-mix(in oklch, var(--brand) ${Math.round((1 - t) * 100)}%, var(--warning) ${Math.round(t * 100)}%)`}
+              />
+            );
+          })}
+          <LabelList
+            dataKey="value"
+            position="right"
+            className="fill-muted-foreground"
+            fontSize={11}
+            formatter={(v: unknown) => {
+              const n = Number(v ?? 0);
+              return unit === "%" ? `${n}%` : n.toLocaleString("en-KE");
+            }}
+          />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+export interface DonutSlice {
+  label: string;
+  value: number;
+  color: string;
+}
+
+function DonutTooltip({
+  active,
+  payload,
+  unit,
+  total,
+}: {
+  active?: boolean;
+  payload?: { name?: string; value?: number }[];
+  unit?: string;
+  total: number;
+}) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0];
+  const pct = total ? Math.round(((p.value ?? 0) / total) * 100) : 0;
+  return (
+    <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md">
+      <p className="font-medium">{p.name}</p>
+      <p className="text-muted-foreground">
+        {(p.value ?? 0).toLocaleString("en-KE")}
+        {unit === "%" ? "%" : ""} · {pct}%
+      </p>
+    </div>
+  );
+}
+
+/** Donut with a soft glow behind the ring — for a technology/fuel-type split. */
+export function DonutChart({ data, unit }: { data: DonutSlice[]; unit?: string }) {
+  const rid = useId().replace(/[:]/g, "");
+  const total = data.reduce((a, b) => a + b.value, 0);
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <PieChart>
+        <defs>
+          <filter id={`glow-${rid}`} x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="3" stdDeviation="8" floodColor="var(--brand)" floodOpacity="0.22" />
+          </filter>
+        </defs>
+        <Pie
+          data={data}
+          dataKey="value"
+          nameKey="label"
+          innerRadius="58%"
+          outerRadius="85%"
+          paddingAngle={2}
+          isAnimationActive={false}
+          filter={`url(#glow-${rid})`}
+        >
+          {data.map((d, i) => (
+            <Cell key={i} fill={d.color} stroke="var(--card)" strokeWidth={2} />
+          ))}
+        </Pie>
+        <Tooltip content={<DonutTooltip unit={unit} total={total} />} />
+      </PieChart>
+    </ResponsiveContainer>
   );
 }
 

@@ -264,3 +264,65 @@ export function runNationalInsight(input: NationalOverviewInput): AgentResponse<
 
   return respond("insight", { parts }, 0.85);
 }
+
+// ---------------------------------------------------------------------------
+// Dashboard insight — the banner atop the national dashboard. Sector-aware:
+// summarizes the national average for the selected metric, its year-on-year
+// move, and the counties leading and trailing on it.
+
+export interface DashboardInsightInput {
+  sectorName: string;
+  periodYear: number;
+  primaryLabel: string;
+  primaryValue: number;
+  primaryUnit: string;
+  deltaPct: number | null;
+  topCounty: { name: string; value: number } | null;
+  laggingCounty: { name: string; value: number } | null;
+}
+
+export type DashboardInsightChip = NationalOverviewChip;
+
+export interface DashboardInsightOutput {
+  parts: (string | DashboardInsightChip)[];
+}
+
+function fmtWithUnit(value: number, unit: string): string {
+  const n = Math.round(value * 10) / 10;
+  return unit === "%" ? `${n}%` : `${n.toLocaleString("en-KE")} ${unit}`;
+}
+
+export function runDashboardInsight(input: DashboardInsightInput): AgentResponse<DashboardInsightOutput> {
+  const { sectorName, periodYear, primaryLabel, primaryValue, primaryUnit, deltaPct, topCounty, laggingCounty } = input;
+
+  const parts: (string | DashboardInsightChip)[] = [
+    `In ${periodYear}, national ${sectorName.toLowerCase()} performance on ${primaryLabel.toLowerCase()} averages `,
+    { label: fmtWithUnit(primaryValue, primaryUnit), tone: "success" },
+  ];
+
+  if (deltaPct !== null) {
+    parts.push(deltaPct >= 0 ? ", up " : ", down ");
+    parts.push({
+      label: `${Math.abs(deltaPct)}%`,
+      tone: deltaPct >= 0 ? "success" : "danger",
+    });
+    parts.push(" from last year.");
+  } else {
+    parts.push(".");
+  }
+
+  if (topCounty) {
+    parts.push(" ");
+    parts.push({ label: `${topCounty.name} leads`, tone: "success" });
+    parts.push(` at ${fmtWithUnit(topCounty.value, primaryUnit)}`);
+    if (laggingCounty) {
+      parts.push(", while ");
+      parts.push({ label: `${laggingCounty.name} trails`, tone: "warning" });
+      parts.push(` at ${fmtWithUnit(laggingCounty.value, primaryUnit)}.`);
+    } else {
+      parts.push(".");
+    }
+  }
+
+  return respond("insight", { parts }, 0.85);
+}
