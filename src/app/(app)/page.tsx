@@ -1,12 +1,11 @@
 import Link from "next/link";
 import { requireProfile, isNational } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { PageHeader, StatTile } from "@/components/page";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MiniBars } from "@/components/charts";
-import { StatusBadge, SubmitterTypeBadge } from "@/components/badges";
-import { relativeTime, fmtDate, daysUntil, daysBetween } from "@/lib/format";
+import { StatusBadge } from "@/components/badges";
+import { fmtDate, daysUntil, daysBetween } from "@/lib/format";
 import { one } from "@/lib/rel";
 import { runCountyInsight, type IndicatorTrend } from "@/lib/agents";
 import {
@@ -19,6 +18,7 @@ import {
   Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NationalHome } from "./national-home";
 
 export default async function HomePage() {
   const profile = await requireProfile();
@@ -441,71 +441,3 @@ async function CountyHome({
   );
 }
 
-/* ----------------------------- National planner ---------------------------- */
-async function NationalHome({ name }: { name: string }) {
-  const supabase = await createClient();
-
-  const counts = await Promise.all([
-    supabase.from("submitters").select("*", { count: "exact", head: true }).eq("type", "county"),
-    supabase.from("submissions").select("*", { count: "exact", head: true }).eq("status", "in_review"),
-    supabase.from("submissions").select("*", { count: "exact", head: true }).eq("status", "published"),
-    supabase.from("submissions").select("*", { count: "exact", head: true }).eq("status", "returned"),
-  ]);
-  const [counties, inReview, published, returned] = counts.map((c) => c.count ?? 0);
-
-  const { data: recent } = await supabase
-    .from("submissions")
-    .select("id, title, status, updated_at, submitter:submitters(type)")
-    .order("updated_at", { ascending: false })
-    .limit(6);
-
-  const first = name.split(/\s+/)[0];
-
-  return (
-    <>
-      <PageHeader
-        title={`Welcome, ${first}`}
-        description="The national picture across counties, providers, and private-sector reporters."
-      >
-        <Button variant="outline" render={<Link href="/dashboard">Open dashboard</Link>} />
-        <Button render={<Link href="/pipeline">Pipeline board</Link>} />
-      </PageHeader>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile label="Counties reporting" value={counties} hint="of 47" accent="brand" />
-        <StatTile label="Plans in review" value={inReview} hint="on the board" accent="warning" />
-        <StatTile label="Published" value={published} hint="this cycle" accent="success" />
-        <StatTile
-          label="Returned for changes"
-          value={returned}
-          hint="awaiting resubmission"
-          accent={returned ? "danger" : "success"}
-        />
-      </div>
-
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle className="text-base">Recent activity</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-1">
-          {(recent ?? []).map((r) => (
-            <Link
-              key={r.id}
-              href={`/submissions/${r.id}`}
-              className="flex items-center justify-between rounded-lg px-3 py-2.5 hover:bg-muted transition-colors"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <SubmitterTypeBadge type={one<{ type: string }>(r.submitter)?.type ?? "county"} />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{r.title}</p>
-                  <p className="text-xs text-muted-foreground">Updated {relativeTime(r.updated_at)}</p>
-                </div>
-              </div>
-              <StatusBadge status={r.status} />
-            </Link>
-          ))}
-        </CardContent>
-      </Card>
-    </>
-  );
-}

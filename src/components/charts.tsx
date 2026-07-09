@@ -62,13 +62,15 @@ export function TrendLine({ data, unit }: { data: Point[]; unit?: string }) {
 }
 
 /** Tiny inline bar trend for stat cards — no axes, no tooltip, just a shape. */
-type Tone = "brand" | "warning" | "danger" | "success" | "muted";
+export type Tone = "brand" | "warning" | "danger" | "success" | "muted" | "agent" | "provider";
 const TONE_VAR: Record<Tone, string> = {
   brand: "var(--brand)",
   warning: "var(--warning)",
   danger: "var(--danger)",
   success: "var(--success)",
   muted: "var(--muted-foreground)",
+  agent: "var(--agent)",
+  provider: "var(--provider)",
 };
 
 export function MiniBars({
@@ -102,6 +104,50 @@ export function MiniBars({
           />
         );
       })}
+    </svg>
+  );
+}
+
+/** Tiny inline line sparkline with a soft fill — for genuine multi-point series only. */
+export function Sparkline({
+  data,
+  tone = "brand",
+  width = 64,
+  height = 24,
+}: {
+  data: number[];
+  tone?: Tone;
+  width?: number;
+  height?: number;
+}) {
+  const color = TONE_VAR[tone];
+  if (data.length < 2) {
+    return (
+      <svg width={width} height={height} className="shrink-0">
+        <line x1={0} y1={height - 1} x2={width} y2={height - 1} stroke={color} strokeWidth={1.5} opacity={0.3} />
+      </svg>
+    );
+  }
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const points = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * width;
+    const y = height - ((v - min) / range) * (height - 3) - 1.5;
+    return `${x},${y}`;
+  });
+  const area = `0,${height} ${points.join(" ")} ${width},${height}`;
+  return (
+    <svg width={width} height={height} className="shrink-0">
+      <polyline points={area} fill={color} fillOpacity={0.12} stroke="none" />
+      <polyline
+        points={points.join(" ")}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

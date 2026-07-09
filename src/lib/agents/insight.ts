@@ -212,3 +212,55 @@ export function runSectorInsight(input: SectorInsightInput): AgentResponse<Secto
 
   return respond("insight", { text }, 0.8);
 }
+
+// ---------------------------------------------------------------------------
+// National overview insight — one sentence for the planner's home screen,
+// with the key numbers broken out as chips so the caller can render them in
+// their own color rather than plain text.
+
+export interface NationalOverviewInput {
+  periodLabel: string;
+  countiesSubmitted: number;
+  countiesTotal: number;
+  overdueCount: number;
+  flaggedCount: number;
+}
+
+export interface NationalOverviewChip {
+  label: string;
+  tone: "success" | "danger" | "warning";
+}
+
+export interface NationalOverviewOutput {
+  parts: (string | NationalOverviewChip)[];
+}
+
+export function runNationalInsight(input: NationalOverviewInput): AgentResponse<NationalOverviewOutput> {
+  const { periodLabel, countiesSubmitted, countiesTotal, overdueCount, flaggedCount } = input;
+
+  const parts: (string | NationalOverviewChip)[] = [
+    `For ${periodLabel}, `,
+    { label: `${countiesSubmitted} of ${countiesTotal} counties`, tone: "success" },
+    " have submitted their plans.",
+  ];
+
+  if (overdueCount > 0) {
+    parts.push(" ");
+    parts.push({ label: `${overdueCount} ${overdueCount === 1 ? "county is" : "counties are"} overdue`, tone: "danger" });
+  }
+  if (flaggedCount > 0) {
+    parts.push(overdueCount > 0 ? ", and " : " ");
+    parts.push({
+      label: `${flaggedCount} ${flaggedCount === 1 ? "has" : "have"} open flags`,
+      tone: "warning",
+    });
+    parts.push(" to resolve.");
+  } else if (overdueCount > 0) {
+    parts.push(".");
+  }
+  if (overdueCount === 0 && flaggedCount === 0) {
+    parts.push(" Nothing is overdue or flagged right now.");
+  }
+
+  return respond("insight", { parts }, 0.85);
+}
