@@ -40,8 +40,8 @@ const db = createClient(url, serviceKey, {
 });
 
 const ZERO = "00000000-0000-0000-0000-000000000000";
-const CYCLE_YEARS = [2022, 2023, 2024];
-const PLAN_YEAR = 2025;
+const CYCLE_YEARS = [2023, 2024, 2025];
+const PLAN_YEAR = 2026;
 
 // ---- deterministic pseudo-random so re-seeding gives stable numbers ---------
 function hashStr(s: string): number {
@@ -145,9 +145,9 @@ async function main() {
     {
       name: "2025 Integrated National Energy Plan Cycle",
       triggered_by: "Cabinet Secretary, Ministry of Energy",
-      triggered_at: "2025-01-15",
-      plan_due_date: "2025-06-30",
-      report_due_dates: JSON.stringify(["2025-01-31", "2025-07-31"]),
+      triggered_at: "2026-04-01",
+      plan_due_date: "2026-09-30",
+      report_due_dates: JSON.stringify(["2026-04-30", "2026-10-31"]),
       status: "active",
     },
   ]);
@@ -199,6 +199,10 @@ async function main() {
   await insert("users", userRows);
   const officerId = userRows.find((u) => u.role === "county_officer")!.id as string;
   const plannerId = userRows.find((u) => u.role === "national_planner")!.id as string;
+  // Historical approvals/returns are attributed to admin (a real, blanket
+  // authority under the pipeline's stage-based RBAC) rather than the planner,
+  // who — under that same RBAC — has no write access to any stage.
+  const adminId = userRows.find((u) => u.role === "admin")!.id as string;
 
   // ---- submissions ----------------------------------------------------------
   console.log("→ Generating submissions, values, history…");
@@ -222,12 +226,15 @@ async function main() {
         cidp_reference: `CIDP ${name} 2023-2027`, returned: false,
       });
     }
-    // live full plan somewhere on the board
-    const lane = idx % 6; // 0..5
-    const targetKey = ["draft", "committee_review", "executive_approval", "assembly_approval", "published", "committee_review"][lane];
+    // live full plan somewhere on the board — an even spread across the real
+    // stages, with only a small, separate minority (~4 of 47) sent back for
+    // changes. That "returned" set deliberately never lands on counties whose
+    // lane already reads "published", so "overdue" reads as a real minority.
+    const lane = idx % 5; // 0..4
+    const targetKey = ["draft", "committee_review", "executive_approval", "assembly_approval", "published"][lane];
     const targetIdx = stagesOf("county").findIndex((s) => s.stage_key === targetKey);
-    const returned = lane === 5;
-    const status = targetKey === "published" ? "published" : targetKey === "draft" ? "draft" : returned ? "returned" : "in_review";
+    const returned = idx % 11 === 5;
+    const status = returned ? "returned" : targetKey === "published" ? "published" : targetKey === "draft" ? "draft" : "in_review";
     subSeeds.push({
       title: `${name} Energy Plan ${PLAN_YEAR}`, submitter_id: sid,
       submission_type: "full_plan", period_year: PLAN_YEAR, period_half: null,
@@ -267,8 +274,8 @@ async function main() {
   PRIVATE_ORGS.forEach((o, i) => {
     const sid = submitterByCode.get(o.code)!.id;
     subSeeds.push({
-      title: `${o.name} Project Report 2024`, submitter_id: sid,
-      submission_type: "annual_report", period_year: 2024, period_half: null,
+      title: `${o.name} Project Report ${CYCLE_YEARS[CYCLE_YEARS.length - 1]}`, submitter_id: sid,
+      submission_type: "annual_report", period_year: CYCLE_YEARS[CYCLE_YEARS.length - 1], period_half: null,
       status: "published", current_stage_id: stageId("private_sector", "published"),
       stageIdxTarget: 3, type: "private_sector", factor: 1.4, key: o.code, indicators: privateIndicators,
       cidp_reference: null, returned: false,
@@ -309,20 +316,33 @@ async function main() {
   }
   await insert("submission_values", valueRows);
 
-  // stage history for anything past draft
+  // stage history for anything past draft — staggered across real days, not
+  // all at the seed instant, so "time in this stage" actually varies per card
+  // (and some genuinely trip the lingering-past-threshold amber state).
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
   const historyRows: Record<string, unknown>[] = [];
-  for (const s of subSeeds) {
-    if (s.stageIdxTarget <= 0 && !s.returned) continue;
+  subSeeds.forEach((s, idx) => {
+    if (s.stageIdxTarget <= 0 && !s.returned) return;
     const subId = subIdByTitle.get(s.title)!;
     const chain = stagesOf(s.type);
-    historyRows.push({ submission_id: subId, stage_id: chain[0].id, action: "submitted", actor_id: officerId, comment: "Submitted for review" });
+    const entries: { stage_id: string; action: string; actor_id: string; comment: string | null }[] = [
+      { stage_id: chain[0].id, action: "submitted", actor_id: officerId, comment: "Submitted for review" },
+    ];
     for (let k = 1; k <= s.stageIdxTarget; k++) {
-      historyRows.push({ submission_id: subId, stage_id: chain[k].id, action: "approved", actor_id: plannerId, comment: null });
+      entries.push({ stage_id: chain[k].id, action: "approved", actor_id: adminId, comment: null });
     }
     if (s.returned) {
-      historyRows.push({ submission_id: subId, stage_id: chain[Math.max(0, s.stageIdxTarget)].id, action: "sent_back", actor_id: plannerId, comment: "Please reconcile the electricity access figure with last year's report." });
+      entries.push({
+        stage_id: chain[Math.max(0, s.stageIdxTarget)].id, action: "sent_back", actor_id: adminId,
+        comment: "Please reconcile the electricity access figure with last year's report.",
+      });
     }
-  }
+    const finalAge = idx % 9; // how many days ago the CURRENT stage was entered — varies 0..8
+    entries.forEach((e, i) => {
+      const age = finalAge + (entries.length - 1 - i) * 2; // earlier steps are further back
+      historyRows.push({ submission_id: subId, ...e, acted_at: daysAgo(age) });
+    });
+  });
   await insert("submission_stage_history", historyRows);
 
   // ---- a few deliberate anomalies + cross-cutting scores --------------------
@@ -378,14 +398,13 @@ async function main() {
   }
   // a couple of EPRA-sourced national figures, tagged distinctly
   summaryRows.push(
-    { planning_cycle_id: cycle.id, sector_id: sectorId.get("electricity"), indicator_id: indicatorId.get("avg_tariff_kwh"), period_year: 2024, aggregated_value: 23.9, submitter_count: 0, source: "epra_national" },
-    { planning_cycle_id: cycle.id, sector_id: sectorId.get("electricity"), indicator_id: indicatorId.get("installed_capacity_mw"), period_year: 2024, aggregated_value: 3321, submitter_count: 0, source: "epra_national" }
+    { planning_cycle_id: cycle.id, sector_id: sectorId.get("electricity"), indicator_id: indicatorId.get("avg_tariff_kwh"), period_year: CYCLE_YEARS[CYCLE_YEARS.length - 1], aggregated_value: 23.9, submitter_count: 0, source: "epra_national" },
+    { planning_cycle_id: cycle.id, sector_id: sectorId.get("electricity"), indicator_id: indicatorId.get("installed_capacity_mw"), period_year: CYCLE_YEARS[CYCLE_YEARS.length - 1], aggregated_value: 3321, submitter_count: 0, source: "epra_national" }
   );
   await insert("national_summaries", summaryRows);
 
   // ---- supporting documents ---------------------------------------------------
   console.log("→ Seeding supporting documents…");
-  const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
   const documentRows: Record<string, unknown>[] = [];
   COUNTIES.forEach((c, i) => {
     const sid = submitterByCode.get(c.code)!.id;

@@ -14,15 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { RoleBadge } from "@/components/badges";
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
-}
+import { initials } from "@/lib/format";
 
 export function AppHeader({ profile, unread }: { profile: Profile; unread: number }) {
   const scope = profile.submitter?.name ?? "National level";

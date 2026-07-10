@@ -273,6 +273,7 @@ export const DEMO_USERS: {
   { email: "admin@inep.go.ke", full_name: "System Administrator", role: "admin" },
   { email: "planner@inep.go.ke", full_name: "Grace Wanjiru (National Planner)", role: "national_planner" },
   { email: "committee@inep.go.ke", full_name: "David Otieno (Committee Member)", role: "committee_member" },
+  { email: "makueni.committee@inep.go.ke", full_name: "Peter Mwangi (Makueni Energy Planning Committee)", role: "committee_member", submitter_code: "017" },
   { email: "makueni@inep.go.ke", full_name: "Mary Mwikali (Makueni Energy Officer)", role: "county_officer", submitter_code: "017" },
   { email: "nairobi@inep.go.ke", full_name: "John Kamau (Nairobi Energy Officer)", role: "county_officer", submitter_code: "047" },
 ];

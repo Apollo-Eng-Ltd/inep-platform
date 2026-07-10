@@ -29,6 +29,20 @@ export function daysUntil(iso: string | null | undefined): number | null {
   return Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
 }
 
+export function daysSince(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+}
+
+export function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+}
+
 export function pctElapsed(startIso: string | null | undefined, endIso: string | null | undefined): number | null {
   if (!startIso || !endIso) return null;
   const start = new Date(startIso).getTime();

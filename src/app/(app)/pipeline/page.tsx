@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { requireProfile, isNational } from "@/lib/auth";
+import { requireProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page";
-import { PipelineCard, type PipelineCardData } from "@/components/pipeline-card";
+import { PipelineBoard, type PipelineCardData, type StageInfo } from "./pipeline-board";
+import { STAGE_ROLE, canActOnStage } from "@/lib/pipeline-rbac";
 import { one } from "@/lib/rel";
+import { initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const TYPES = [
@@ -18,63 +20,133 @@ export default async function PipelinePage({
   searchParams: Promise<{ type?: string }>;
 }) {
   const profile = await requireProfile();
-  const canManage = isNational(profile.role);
   const { type: typeParam } = await searchParams;
   const type = TYPES.some((t) => t.key === typeParam) ? typeParam! : "county";
 
   const supabase = await createClient();
 
-  const { data: stages } = await supabase
-    .from("workflow_stages")
-    .select("id, name, sort_order, is_terminal")
-    .eq("submitter_type", type)
-    .order("sort_order");
+  const [{ data: stages }, { data: subRows }, { data: reviewers }] = await Promise.all([
+    supabase
+      .from("workflow_stages")
+      .select("id, name, stage_key, sort_order, is_terminal")
+      .eq("submitter_type", type)
+      .order("sort_order"),
+    supabase
+      .from("submissions")
+      .select("id, title, submitter_id, current_stage_id, period_year, created_at, submitter:submitters!inner(name, type)")
+      .eq("submitter.type", type)
+      .order("period_year", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("users")
+      .select("id, full_name, role, submitter_id")
+      .in("role", ["county_officer", "committee_member", "admin"]),
+  ]);
+
   const stageList = stages ?? [];
-  const maxOrder = Math.max(...stageList.map((s) => s.sort_order), 0);
 
-  const { data: subs } = await supabase
-    .from("submissions")
-    .select("id, title, current_stage_id, submitter:submitters!inner(name, type)")
-    .eq("submitter.type", type)
-    .eq("period_year", 2025)
-    .limit(200);
+  // one live submission per submitter — the highest period_year on file wins
+  const seen = new Set<string>();
+  const subs = (subRows ?? []).filter((s) => {
+    if (seen.has(s.submitter_id)) return false;
+    seen.add(s.submitter_id);
+    return true;
+  });
+  const submissionIds = subs.map((s) => s.id);
 
-  // open flags per submission
-  const { data: flags } = await supabase
-    .from("validation_results")
-    .select("submission_id")
-    .eq("status", "open");
+  const [{ data: flagRows }, { data: historyRows }] = await Promise.all([
+    submissionIds.length
+      ? supabase.from("validation_results").select("submission_id").eq("status", "open").in("submission_id", submissionIds)
+      : Promise.resolve({ data: [] as { submission_id: string }[] }),
+    submissionIds.length
+      ? supabase
+          .from("submission_stage_history")
+          .select("id, submission_id, action, comment, acted_at, stage:workflow_stages(name), actor:users(full_name)")
+          .in("submission_id", submissionIds)
+          .order("acted_at", { ascending: true })
+      : Promise.resolve({ data: [] as unknown[] }),
+  ]);
+
   const flagCount = new Map<string, number>();
-  for (const f of flags ?? []) flagCount.set(f.submission_id, (flagCount.get(f.submission_id) ?? 0) + 1);
+  (flagRows ?? []).forEach((f) => flagCount.set(f.submission_id, (flagCount.get(f.submission_id) ?? 0) + 1));
+
+  type HistoryRow = {
+    id: string;
+    submission_id: string;
+    action: string;
+    comment: string | null;
+    acted_at: string;
+    stage: unknown;
+    actor: unknown;
+  };
+  const historyBySubmission = new Map<string, PipelineCardData["history"]>();
+  ((historyRows ?? []) as HistoryRow[]).forEach((h) => {
+    const list = historyBySubmission.get(h.submission_id) ?? [];
+    list.push({
+      id: h.id,
+      action: h.action,
+      comment: h.comment,
+      actedAt: h.acted_at,
+      stageName: one<{ name: string }>(h.stage)?.name ?? "—",
+      actorName: one<{ full_name: string }>(h.actor)?.full_name ?? "—",
+    });
+    historyBySubmission.set(h.submission_id, list);
+  });
 
   const stageOrderById = new Map(stageList.map((s) => [s.id, s.sort_order]));
-  const cardsByStage = new Map<string, PipelineCardData[]>();
-  for (const s of subs ?? []) {
+  const stageById = new Map(stageList.map((s) => [s.id, s]));
+  const maxOrder = Math.max(...stageList.map((s) => s.sort_order), 0);
+
+  const cards: PipelineCardData[] = subs.map((s) => {
     const submitter = one<{ name: string; type: string }>(s.submitter);
-    const order = s.current_stage_id ? stageOrderById.get(s.current_stage_id) ?? 0 : 0;
-    const card: PipelineCardData = {
+    const stage = s.current_stage_id ? stageById.get(s.current_stage_id) : stageList[0];
+    const stageKey = stage?.stage_key ?? "draft";
+    const order = stage ? stageOrderById.get(stage.id) ?? 0 : 0;
+    const history = (historyBySubmission.get(s.id) ?? []).sort(
+      (a, b) => new Date(a.actedAt).getTime() - new Date(b.actedAt).getTime()
+    );
+    const enteredStageAt = history.length ? history[history.length - 1].actedAt : s.created_at;
+
+    // Who's authorized to act on this stage for this org — prefer someone
+    // scoped to this exact submitter over an unscoped, platform-wide reviewer.
+    const requiredRole = STAGE_ROLE[stageKey];
+    const candidates = (reviewers ?? []).filter((r) => r.role === requiredRole);
+    const waitingOn =
+      candidates.find((r) => r.submitter_id === s.submitter_id) ??
+      candidates.find((r) => r.submitter_id === null) ??
+      null;
+
+    return {
       id: s.id,
       title: s.title,
+      submitterId: s.submitter_id,
       submitterName: submitter?.name ?? "—",
       submitterType: submitter?.type ?? type,
+      stageId: stage?.id ?? stageList[0]?.id ?? "",
+      stageKey,
       flags: flagCount.get(s.id) ?? 0,
-      canAdvance: order < maxOrder,
-      canReturn: order > 0,
+      enteredStageAt,
+      waitingOnName: waitingOn?.full_name ?? null,
+      waitingOnInitials: waitingOn ? initials(waitingOn.full_name) : "—",
+      canAdvance: order < maxOrder && canActOnStage({ role: profile.role, submitterId: profile.submitter_id }, stageKey, s.submitter_id),
+      canReturn: order > 0 && canActOnStage({ role: profile.role, submitterId: profile.submitter_id }, stageKey, s.submitter_id),
+      history,
     };
-    const key = s.current_stage_id ?? stageList[0]?.id ?? "";
-    const arr = cardsByStage.get(key) ?? [];
-    arr.push(card);
-    cardsByStage.set(key, arr);
-  }
+  });
+
+  const stageInfos: StageInfo[] = stageList.map((s) => ({
+    id: s.id,
+    name: s.name,
+    isTerminal: s.is_terminal,
+  }));
 
   return (
     <>
       <PageHeader
         title="Plan pipeline board"
-        description="Every plan as a card moving through its real approval stages. Cards can move backward with a comment, just like a real committee sending work back."
+        description="Every plan as a card moving through its real approval stages. Nothing moves without a visible action attached to it."
       />
 
-      {/* Type filter */}
       <div className="inline-flex rounded-xl bg-muted p-1 mb-6">
         {TYPES.map((t) => (
           <Link
@@ -83,7 +155,7 @@ export default async function PipelinePage({
             className={cn(
               "px-3.5 py-1.5 rounded-lg text-sm transition-all duration-150",
               type === t.key
-                ? "bg-card text-foreground font-medium shadow-sm ring-1 ring-foreground/[0.06]"
+                ? "bg-card text-foreground font-medium shadow-sm ring-1 ring-foreground/6"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
@@ -92,37 +164,7 @@ export default async function PipelinePage({
         ))}
       </div>
 
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {stageList.map((stage) => {
-          const cards = cardsByStage.get(stage.id) ?? [];
-          return (
-            <div key={stage.id} className="w-64 shrink-0">
-              <div className="flex items-center justify-between mb-3 px-1">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={cn(
-                      "size-1.5 rounded-full",
-                      stage.is_terminal ? "bg-success" : "bg-muted-foreground/40"
-                    )}
-                  />
-                  <h3 className="text-sm font-medium">{stage.name}</h3>
-                </div>
-                <span className="text-xs text-muted-foreground tabular-nums">{cards.length}</span>
-              </div>
-              <div className="space-y-2.5">
-                {cards.map((c) => (
-                  <PipelineCard key={c.id} card={c} canManage={canManage} />
-                ))}
-                {cards.length === 0 && (
-                  <div className="rounded-xl border border-dashed border-border py-8 text-center text-xs text-muted-foreground">
-                    Empty
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <PipelineBoard stages={stageInfos} cards={cards} />
     </>
   );
 }

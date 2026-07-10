@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { MiniBars } from "@/components/charts";
-import { daysUntil } from "@/lib/format";
+import { daysUntil, daysBetween } from "@/lib/format";
 import { runNationalInsight, type NationalOverviewChip } from "@/lib/agents";
 import { one } from "@/lib/rel";
 import { cn } from "@/lib/utils";
@@ -34,7 +34,7 @@ export async function NationalHome({ name }: { name: string }) {
   ] = await Promise.all([
     supabase
       .from("submissions")
-      .select("id, submitter_id, status, period_year, created_at")
+      .select("id, submitter_id, status, period_year, created_at, submitted_at")
       .eq("submission_type", "full_plan")
       .in("submitter_id", countyIds)
       .order("period_year", { ascending: false })
@@ -55,9 +55,11 @@ export async function NationalHome({ name }: { name: string }) {
   ]);
 
   // latest full_plan per county (already ordered so the first hit per submitter wins)
-  const planByCounty = new Map<string, { id: string; status: string }>();
+  const planByCounty = new Map<string, { id: string; status: string; submittedAt: string | null }>();
   (planRows ?? []).forEach((p) => {
-    if (!planByCounty.has(p.submitter_id)) planByCounty.set(p.submitter_id, { id: p.id, status: p.status });
+    if (!planByCounty.has(p.submitter_id)) {
+      planByCounty.set(p.submitter_id, { id: p.id, status: p.status, submittedAt: p.submitted_at });
+    }
   });
   const planIds = [...planByCounty.values()].map((p) => p.id);
 
@@ -73,27 +75,45 @@ export async function NationalHome({ name }: { name: string }) {
     flagsByPlan.set(f.submission_id, cur);
   });
 
-  // real per-county trend: electricity access rate across the years on file
-  const { data: electricityIndicator } = await supabase
-    .from("indicators")
-    .select("id")
-    .eq("slug", "electricity_access_pct")
-    .maybeSingle();
+  // real per-county trend: a composite of three real indicators (not just one),
+  // so each county's own mix of ups and downs actually shows — a single
+  // indicator shares the same rising-with-noise shape for every county, which
+  // reads as "the same sparkline" even though the magnitudes differ.
+  const TREND_SLUGS = ["electricity_access_pct", "clean_cooking_pct", "firewood_dependency_pct"];
+  const { data: trendIndicators } = await supabase.from("indicators").select("id, slug").in("slug", TREND_SLUGS);
+  const trendIndicatorIds = (trendIndicators ?? []).map((i) => i.id);
+  const slugByIndicatorId = new Map((trendIndicators ?? []).map((i) => [i.id, i.slug]));
   const reportIds = (annualReports ?? []).map((r) => r.id);
-  const { data: trendValues } = electricityIndicator && reportIds.length
+  const { data: trendValues } = trendIndicatorIds.length && reportIds.length
     ? await supabase
         .from("submission_values")
-        .select("submission_id, value")
-        .eq("indicator_id", electricityIndicator.id)
+        .select("submission_id, indicator_id, value")
+        .in("indicator_id", trendIndicatorIds)
         .in("submission_id", reportIds)
-    : { data: [] as { submission_id: string; value: number | null }[] };
-  const valueByReport = new Map((trendValues ?? []).map((v) => [v.submission_id, v.value]));
-  const reportsByCounty = new Map<string, { year: number; value: number }[]>();
+    : { data: [] as { submission_id: string; indicator_id: string; value: number | null }[] };
+
+  const valuesByReport = new Map<string, Record<string, number>>();
+  (trendValues ?? []).forEach((v) => {
+    if (v.value == null) return;
+    const slug = slugByIndicatorId.get(v.indicator_id);
+    if (!slug) return;
+    const rec = valuesByReport.get(v.submission_id) ?? {};
+    rec[slug] = v.value;
+    valuesByReport.set(v.submission_id, rec);
+  });
+
+  const reportsByCounty = new Map<string, { year: number; composite: number }[]>();
   (annualReports ?? []).forEach((r) => {
-    const v = valueByReport.get(r.id);
-    if (v == null) return;
+    const rec = valuesByReport.get(r.id);
+    if (!rec) return;
+    const parts: number[] = [];
+    if (rec.electricity_access_pct != null) parts.push(rec.electricity_access_pct);
+    if (rec.clean_cooking_pct != null) parts.push(rec.clean_cooking_pct);
+    if (rec.firewood_dependency_pct != null) parts.push(100 - rec.firewood_dependency_pct); // lower is better
+    if (!parts.length) return;
+    const composite = parts.reduce((a, b) => a + b, 0) / parts.length;
     const list = reportsByCounty.get(r.submitter_id) ?? [];
-    list.push({ year: r.period_year, value: v });
+    list.push({ year: r.period_year, composite });
     reportsByCounty.set(r.submitter_id, list);
   });
 
@@ -102,19 +122,25 @@ export async function NationalHome({ name }: { name: string }) {
     const plan = planByCounty.get(c.id);
     const status = plan?.status ?? "draft";
     const complete = COMPLETE.has(status);
-    const overdue = !complete && daysLeft != null && daysLeft < 0;
+    // "Returned" plans are the real, deliberate minority of overdue counties;
+    // the shared deadline only adds to that if it has genuinely passed.
+    const overdue = !complete && (status === "returned" || (daysLeft != null && daysLeft < 0));
     const flags = plan ? flagsByPlan.get(plan.id) : undefined;
     const flaggedCount = (flags?.error ?? 0) + (flags?.warning ?? 0);
     const trend = (reportsByCounty.get(c.id) ?? [])
       .sort((a, b) => a.year - b.year)
-      .map((r) => r.value);
+      .map((r) => r.composite);
+    // How many days before (positive) or after (negative) the shared deadline
+    // this county actually submitted — null until they have.
+    const earlyLateDays =
+      plan?.submittedAt && cycle?.plan_due_date ? daysBetween(plan.submittedAt, cycle.plan_due_date) : null;
     return {
       id: c.id,
       name: c.name,
       region: c.region ?? "",
       status,
       overdue,
-      daysLeft,
+      earlyLateDays,
       flaggedCount,
       trend,
       viewHref: plan ? `/submissions/${plan.id}` : null,
@@ -155,11 +181,21 @@ export async function NationalHome({ name }: { name: string }) {
   return (
     <>
       <p className="text-sm text-muted-foreground">Welcome back, {first}.</p>
-      <div className="flex items-center gap-3 mt-1 mb-6">
+      <div className="flex items-center gap-3 mt-1 mb-6 flex-wrap">
         <h1 className="text-2xl font-semibold tracking-tight">National overview</h1>
         <span className="rounded-full bg-brand-soft text-brand px-2.5 py-1 text-xs font-medium">
           {periodYear} reporting period
         </span>
+        {daysLeft != null && (
+          <span
+            className={cn(
+              "rounded-full px-2.5 py-1 text-xs font-medium",
+              daysLeft < 0 ? "bg-danger-soft text-danger" : daysLeft < 7 ? "bg-warning-soft text-warning" : "bg-muted text-muted-foreground"
+            )}
+          >
+            {daysLeft < 0 ? `Overdue by ${Math.abs(daysLeft)} days` : `${daysLeft} days left until this deadline`}
+          </span>
+        )}
       </div>
 
       {/* Hero stat row */}
@@ -186,7 +222,7 @@ export async function NationalHome({ name }: { name: string }) {
             {overdueCount}
           </p>
           <p className="text-xs text-muted-foreground">
-            {overdueCount > 0 ? "past the plan deadline" : "nothing overdue"}
+            {overdueCount > 0 ? "sent back or past deadline" : "nothing overdue"}
           </p>
         </Card>
 

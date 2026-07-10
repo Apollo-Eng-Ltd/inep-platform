@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { StatusBadge } from "@/components/badges";
 import { Sparkline } from "@/components/charts";
 import { cn } from "@/lib/utils";
 import { ArrowRight } from "lucide-react";
@@ -16,7 +15,9 @@ export interface CountyRow {
   region: string;
   status: string;
   overdue: boolean;
-  daysLeft: number | null;
+  /** Days before (positive) or after (negative) the shared deadline this
+   *  county actually submitted — null if they haven't submitted yet. */
+  earlyLateDays: number | null;
   flaggedCount: number;
   /** Real per-county trend (electricity access rate across annual reports on file). */
   trend: number[];
@@ -25,19 +26,29 @@ export interface CountyRow {
 
 const COMPLETE = new Set(["approved", "published"]);
 
+const STATUS_META = {
+  not_started: { label: "Not started", pill: "bg-muted text-muted-foreground" },
+  in_progress: { label: "In progress", pill: "bg-provider-soft text-provider" },
+  complete: { label: "Complete", pill: "bg-success-soft text-success" },
+} as const;
+
+function statusKeyFor(r: CountyRow): keyof typeof STATUS_META {
+  if (COMPLETE.has(r.status)) return "complete";
+  if (!r.viewHref) return "not_started";
+  return "in_progress";
+}
+
+// Overdue first, then flagged, then everyone else.
 function priority(r: CountyRow): number {
-  if (r.status === "returned") return 0;
-  if (r.overdue) return 1;
-  if (r.flaggedCount > 0) return 2;
-  if (r.status === "in_review" || r.status === "submitted") return 3;
-  if (r.status === "draft") return 4;
-  return 5;
+  if (r.overdue) return 0;
+  if (r.flaggedCount > 0) return 1;
+  return 2;
 }
 
 const SORT_OPTIONS = [
   { value: "priority", label: "Status (overdue first)" },
   { value: "name", label: "County name (A–Z)" },
-  { value: "days", label: "Days left" },
+  { value: "timing", label: "Submission timing (latest first)" },
 ];
 
 export function CountyStatusTable({ rows }: { rows: CountyRow[] }) {
@@ -46,7 +57,8 @@ export function CountyStatusTable({ rows }: { rows: CountyRow[] }) {
   const sorted = useMemo(() => {
     const copy = [...rows];
     if (sort === "name") copy.sort((a, b) => a.name.localeCompare(b.name));
-    else if (sort === "days") copy.sort((a, b) => (a.daysLeft ?? 999) - (b.daysLeft ?? 999));
+    else if (sort === "timing")
+      copy.sort((a, b) => (a.earlyLateDays ?? Infinity) - (b.earlyLateDays ?? Infinity));
     else copy.sort((a, b) => priority(a) - priority(b) || a.name.localeCompare(b.name));
     return copy;
   }, [rows, sort]);
@@ -71,11 +83,11 @@ export function CountyStatusTable({ rows }: { rows: CountyRow[] }) {
 
       <CardContent className="p-0">
         <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left bg-linear-to-r from-brand-soft/40 via-transparent to-transparent">
+          <thead className="bg-linear-to-r from-brand-soft/70 via-brand-soft/20 to-transparent shadow-[inset_0_-1px_0_var(--border)]">
+            <tr className="text-left">
               <th className="font-medium text-muted-foreground text-xs uppercase tracking-wide px-5 py-3">County</th>
               <th className="font-medium text-muted-foreground text-xs uppercase tracking-wide px-5 py-3">Status</th>
-              <th className="font-medium text-muted-foreground text-xs uppercase tracking-wide px-5 py-3">Days left</th>
+              <th className="font-medium text-muted-foreground text-xs uppercase tracking-wide px-5 py-3">Submitted</th>
               <th className="font-medium text-muted-foreground text-xs uppercase tracking-wide px-5 py-3">Trend</th>
               <th className="w-24" />
             </tr>
@@ -83,23 +95,29 @@ export function CountyStatusTable({ rows }: { rows: CountyRow[] }) {
           <tbody>
             {sorted.map((r) => {
               const complete = COMPLETE.has(r.status);
+              const statusKey = statusKeyFor(r);
+              const meta = STATUS_META[statusKey];
               return (
                 <tr key={r.id} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
                   <td className="px-5 py-2.5 font-medium">{r.name}</td>
                   <td className="px-5 py-2.5">
-                    <StatusBadge status={r.status} />
+                    <span className={cn("inline-flex rounded-full px-2.5 py-1 text-xs font-medium", meta.pill)}>
+                      {meta.label}
+                    </span>
                   </td>
                   <td className="px-5 py-2.5">
-                    {complete ? (
-                      <span className="text-success font-medium">Submitted</span>
-                    ) : r.overdue ? (
-                      <span className="text-danger font-medium">Overdue</span>
-                    ) : r.daysLeft != null ? (
-                      <span className={cn("font-medium tabular-nums", r.daysLeft < 7 ? "text-warning" : "text-muted-foreground")}>
-                        {r.daysLeft}d left
+                    {r.earlyLateDays == null ? (
+                      <span className="text-muted-foreground">Not yet submitted</span>
+                    ) : r.earlyLateDays > 0 ? (
+                      <span className="text-success font-medium tabular-nums">
+                        {r.earlyLateDays}d early
+                      </span>
+                    ) : r.earlyLateDays < 0 ? (
+                      <span className="text-danger font-medium tabular-nums">
+                        {Math.abs(r.earlyLateDays)}d late
                       </span>
                     ) : (
-                      <span className="text-muted-foreground">—</span>
+                      <span className="text-muted-foreground font-medium">On time</span>
                     )}
                   </td>
                   <td className="px-5 py-2.5">
