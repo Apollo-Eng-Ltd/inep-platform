@@ -16,6 +16,7 @@ import {
   PRIVATE_ORGS,
   SECTORS,
   INDICATORS,
+  EPRA_INDICATORS,
   STAGES,
   SAMPLE_WARDS,
   DEMO_USERS,
@@ -126,6 +127,19 @@ async function main() {
   );
   const indicatorId = new Map(indicatorRows.map((i) => [i.slug, i.id]));
 
+  // EPRA "Year at a Glance" indicators — a separate catalog insert so these
+  // never end up in any submission's field list (see comment in data.ts).
+  const epraIndicatorRows = await insert<{ id: string; slug: string }>(
+    "indicators",
+    EPRA_INDICATORS.map((i, idx) => ({
+      sector_id: sectorId.get(i.sector),
+      slug: i.slug, name: i.name, unit: i.unit,
+      expected_min: null, expected_max: null,
+      description: i.description, sort_order: 100 + idx, // well past the real per-sector indicators
+    }))
+  );
+  epraIndicatorRows.forEach((i) => indicatorId.set(i.slug, i.id));
+
   const stageRows = await insert<{ id: string; submitter_type: string; stage_key: string; sort_order: number }>(
     "workflow_stages", STAGES
   );
@@ -161,7 +175,7 @@ async function main() {
     })),
     ...PROVIDERS.map((p) => ({
       type: "national_provider", name: p.name, code: p.code, region: p.region,
-      review_cycle_years: 5, profile: {},
+      review_cycle_years: 5, profile: { gps_lat: p.gps_lat, gps_lng: p.gps_lng },
     })),
     ...PRIVATE_ORGS.map((o) => ({
       type: "private_sector", name: o.name, code: o.code, region: o.region,
@@ -401,6 +415,203 @@ async function main() {
     { planning_cycle_id: cycle.id, sector_id: sectorId.get("electricity"), indicator_id: indicatorId.get("avg_tariff_kwh"), period_year: CYCLE_YEARS[CYCLE_YEARS.length - 1], aggregated_value: 23.9, submitter_count: 0, source: "epra_national" },
     { planning_cycle_id: cycle.id, sector_id: sectorId.get("electricity"), indicator_id: indicatorId.get("installed_capacity_mw"), period_year: CYCLE_YEARS[CYCLE_YEARS.length - 1], aggregated_value: 3321, submitter_count: 0, source: "epra_national" }
   );
+
+  // EPRA "Year at a Glance" hero-row series — six real, independently
+  // trending years per indicator (levels compound with growth + noise;
+  // "growth" indicators are a YoY rate that wobbles around a base each year).
+  const EPRA_YEARS = [2020, 2021, 2022, 2023, 2024, 2025];
+  const EPRA_LEVEL: Record<string, { base: number; growth: number; cap?: number }> = {
+    energy_generated_gwh: { base: 11_500, growth: 0.035 },
+    renewable_share_pct: { base: 88, growth: 0.012, cap: 96 },
+    peak_demand_mw: { base: 1_850, growth: 0.045 },
+    tou_savings_kes_m: { base: 620, growth: 0.09 },
+  };
+  const EPRA_RATE: Record<string, { base: number; volatility: number }> = {
+    lpg_demand_growth_pct: { base: 11, volatility: 3 },
+    petroleum_demand_growth_pct: { base: 3.5, volatility: 2.5 },
+  };
+  for (const year of EPRA_YEARS) {
+    const yi = year - EPRA_YEARS[0];
+    for (const [slug, { base, growth, cap }] of Object.entries(EPRA_LEVEL)) {
+      const r = rng(`epra:${slug}:${year}`);
+      const noise = 0.97 + r() * 0.06;
+      let value = base * Math.pow(1 + growth, yi) * noise;
+      if (cap != null) value = Math.min(cap, value);
+      summaryRows.push({
+        planning_cycle_id: cycle.id, sector_id: sectorId.get(EPRA_INDICATORS.find((i) => i.slug === slug)!.sector),
+        indicator_id: indicatorId.get(slug), period_year: year,
+        aggregated_value: Math.round(value * 10) / 10, submitter_count: 0, source: "epra_national",
+      });
+    }
+    for (const [slug, { base, volatility }] of Object.entries(EPRA_RATE)) {
+      const r = rng(`epra:${slug}:${year}`);
+      const value = base + (r() - 0.5) * volatility * 2;
+      summaryRows.push({
+        planning_cycle_id: cycle.id, sector_id: sectorId.get(EPRA_INDICATORS.find((i) => i.slug === slug)!.sector),
+        indicator_id: indicatorId.get(slug), period_year: year,
+        aggregated_value: Math.round(value * 10) / 10, submitter_count: 0, source: "epra_national",
+      });
+    }
+  }
+
+  // Generation mix by source — one current-year snapshot per segment,
+  // installed capacity in MW (plausible real-world-scaled shares).
+  const MIX_YEAR = EPRA_YEARS[EPRA_YEARS.length - 1];
+  const GENERATION_MIX: Record<string, number> = {
+    mix_geothermal_mw: 950,
+    mix_hydro_mw: 830,
+    mix_wind_mw: 435,
+    mix_thermal_mw: 750,
+    mix_solar_mw: 170,
+    mix_imports_mw: 200,
+  };
+  for (const [slug, value] of Object.entries(GENERATION_MIX)) {
+    summaryRows.push({
+      planning_cycle_id: cycle.id, sector_id: sectorId.get("electricity"), indicator_id: indicatorId.get(slug),
+      period_year: MIX_YEAR, aggregated_value: value, submitter_count: 0, source: "epra_national",
+    });
+  }
+
+  // Monthly generation vs. target for the current FY — period_year 1-12
+  // encodes FY month order (see the EPRA_INDICATORS comment in data.ts).
+  const monthlyBase = 1_050; // GWh/month
+  for (let m = 1; m <= 12; m++) {
+    const seasonal = Math.sin((m / 12) * Math.PI * 2) * 60;
+    const rActual = rng(`epra:monthly_generation_gwh:${m}`);
+    const actual = Math.round((monthlyBase + seasonal + (rActual() - 0.5) * 80) * 10) / 10;
+    summaryRows.push({
+      planning_cycle_id: cycle.id, sector_id: sectorId.get("electricity"),
+      indicator_id: indicatorId.get("monthly_generation_gwh"), period_year: m,
+      aggregated_value: actual, submitter_count: 0, source: "epra_national",
+    });
+    const target = Math.round((monthlyBase + seasonal * 0.5) * 10) / 10;
+    summaryRows.push({
+      planning_cycle_id: cycle.id, sector_id: sectorId.get("electricity"),
+      indicator_id: indicatorId.get("monthly_generation_target_gwh"), period_year: m,
+      aggregated_value: target, submitter_count: 0, source: "epra_national",
+    });
+  }
+
+  // ---- EPRA report tabs: Electricity, Renewable, Efficiency, Petroleum, LPG,
+  // Energy Balance, Consumer Protection — all national_summaries.source =
+  // "epra_national", never derived from a county submission. -----------------
+  console.log("→ Seeding EPRA report-tab figures (electricity, renewable, petroleum, LPG, consumer protection)…");
+
+  // A 6-year compounding trend, same shape as EPRA_LEVEL above, reused for
+  // every yearly-series indicator across the report tabs.
+  function pushTrend(slug: string, sector: string, base: number, growth: number, volatility = 0.05, cap?: number) {
+    for (const year of EPRA_YEARS) {
+      const yi = year - EPRA_YEARS[0];
+      const r = rng(`epra:${slug}:${year}`);
+      const noise = 1 + (r() - 0.5) * volatility;
+      let value = base * Math.pow(1 + growth, yi) * noise;
+      if (cap != null) value = Math.min(cap, value);
+      summaryRows.push({
+        planning_cycle_id: cycle.id, sector_id: sectorId.get(sector), indicator_id: indicatorId.get(slug),
+        period_year: year, aggregated_value: Math.round(value * 100) / 100, submitter_count: 0, source: "epra_national",
+      });
+    }
+  }
+  // A single current-year snapshot, reused for market-share/mix-style bars.
+  function pushSnapshot(slug: string, sector: string, value: number, year = MIX_YEAR) {
+    summaryRows.push({
+      planning_cycle_id: cycle.id, sector_id: sectorId.get(sector), indicator_id: indicatorId.get(slug),
+      period_year: year, aggregated_value: Math.round(value * 100) / 100, submitter_count: 0, source: "epra_national",
+    });
+  }
+
+  // Overview: growth-vs-economy context
+  pushTrend("gdp_growth_pct", "electricity", 5.1, 0.01, 0.15);
+  pushTrend("per_capita_consumption_kwh", "electricity", 195, 0.035, 0.03);
+
+  // Electricity: reliability, tariffs, market structure, emissions
+  pushTrend("system_losses_pct", "electricity", 23.5, -0.02, 0.04);
+  pushTrend("saidi_hours", "electricity", 42, -0.035, 0.06);
+  pushTrend("saifi_count", "electricity", 11, -0.03, 0.06);
+  pushTrend("avg_tariff_trend_kes_kwh", "electricity", 21, 0.025, 0.03);
+  pushTrend("hhi_index", "electricity", 3400, -0.015, 0.03);
+  pushTrend("ghg_emissions_mtco2e", "electricity", 1.35, 0.02, 0.05);
+
+  // Daily demand profile — one typical day, period_year 0-23 = hour of day.
+  // Two humps: a smaller morning peak, a larger evening peak, low overnight.
+  for (let hour = 0; hour <= 23; hour++) {
+    const r = rng(`epra:daily_demand_profile_mw:${hour}`);
+    const morning = 220 * Math.exp(-((hour - 8) ** 2) / 8);
+    const evening = 420 * Math.exp(-((hour - 19) ** 2) / 6);
+    const value = 1350 + morning + evening + (r() - 0.5) * 40;
+    summaryRows.push({
+      planning_cycle_id: cycle.id, sector_id: sectorId.get("electricity"),
+      indicator_id: indicatorId.get("daily_demand_profile_mw"), period_year: hour,
+      aggregated_value: Math.round(value * 10) / 10, submitter_count: 0, source: "epra_national",
+    });
+  }
+
+  // Final consumption by category — 6-year trend, reused as both the
+  // Electricity tab's current-year bar and the Energy Balance tab's trend.
+  pushTrend("final_consumption_residential_gwh", "electricity", 4_200, 0.04);
+  pushTrend("final_consumption_commercial_gwh", "electricity", 2_600, 0.045);
+  pushTrend("final_consumption_industrial_gwh", "electricity", 3_100, 0.03);
+  pushTrend("final_consumption_transport_gwh", "electricity", 180, 0.15); // e-mobility, fast-growing off a small base
+
+  // Renewable Energy: per-source generation trend + EAC access comparison
+  pushTrend("gen_geothermal_gwh", "electricity", 6_800, 0.03);
+  pushTrend("gen_hydro_gwh", "electricity", 3_600, 0.015, 0.08); // hydro varies more with rainfall
+  pushTrend("gen_wind_gwh", "electricity", 1_650, 0.05);
+  pushTrend("gen_solar_gwh", "electricity", 320, 0.12);
+  pushSnapshot("eac_access_kenya", "electricity", 75.6);
+  pushSnapshot("eac_access_uganda", "electricity", 45.2);
+  pushSnapshot("eac_access_tanzania", "electricity", 40.1);
+  pushSnapshot("eac_access_rwanda", "electricity", 51.8);
+  pushSnapshot("eac_access_ethiopia", "electricity", 55.3);
+
+  // Efficiency
+  pushTrend("avg_appliance_star_rating", "efficiency", 3.1, 0.025, 0.03, 5);
+
+  // Petroleum
+  pushTrend("petroleum_import_volume_kt", "resource_dev", 5_400, 0.035);
+  pushTrend("pipeline_throughput_kt", "resource_dev", 4_100, 0.03);
+  pushTrend("crude_oil_price_usd_bbl", "resource_dev", 78, 0.01, 0.12);
+  pushTrend("pump_price_petrol_kes_l", "resource_dev", 178, 0.035, 0.04);
+  pushTrend("pump_price_diesel_kes_l", "resource_dev", 165, 0.035, 0.04);
+  pushTrend("pump_price_kerosene_kes_l", "resource_dev", 142, 0.03, 0.04);
+  pushSnapshot("omc_share_vivo", "resource_dev", 22.4);
+  pushSnapshot("omc_share_totalenergies", "resource_dev", 19.8);
+  pushSnapshot("omc_share_rubis", "resource_dev", 14.6);
+  pushSnapshot("omc_share_ola", "resource_dev", 9.7);
+  pushSnapshot("omc_share_others", "resource_dev", 33.5);
+
+  // LPG
+  pushTrend("lpg_import_volume_kt", "bioenergy", 320, 0.09);
+  pushSnapshot("lpg_import_route_mombasa_pct", "bioenergy", 82.4);
+  pushSnapshot("lpg_import_route_overland_pct", "bioenergy", 17.6);
+  pushSnapshot("storage_mombasa_kt", "bioenergy", 28.6);
+  pushSnapshot("storage_nairobi_kt", "bioenergy", 12.4);
+  pushSnapshot("storage_kisumu_kt", "bioenergy", 4.8);
+  pushSnapshot("storage_nakuru_kt", "bioenergy", 3.2);
+  pushSnapshot("storage_eldoret_kt", "bioenergy", 2.6);
+  const lpgMonthlyBase = 46; // kt/month
+  for (let m = 1; m <= 12; m++) {
+    const seasonal = Math.sin((m / 12) * Math.PI * 2 + 1) * 4;
+    const r = rng(`epra:lpg_consumption_kt:${m}`);
+    const actual = Math.round((lpgMonthlyBase + seasonal + (r() - 0.5) * 5) * 10) / 10;
+    summaryRows.push({
+      planning_cycle_id: cycle.id, sector_id: sectorId.get("bioenergy"),
+      indicator_id: indicatorId.get("lpg_consumption_kt"), period_year: m,
+      aggregated_value: actual, submitter_count: 0, source: "epra_national",
+    });
+    const target = Math.round((lpgMonthlyBase + seasonal * 0.6) * 10) / 10;
+    summaryRows.push({
+      planning_cycle_id: cycle.id, sector_id: sectorId.get("bioenergy"),
+      indicator_id: indicatorId.get("lpg_consumption_target_kt"), period_year: m,
+      aggregated_value: target, submitter_count: 0, source: "epra_national",
+    });
+  }
+
+  // Consumer Protection
+  pushTrend("licensing_volume", "resource_dev", 410, 0.06);
+  pushTrend("compliance_rate_pct", "resource_dev", 81, 0.015, 0.03, 100);
+  pushTrend("complaints_resolved_pct", "resource_dev", 74, 0.025, 0.04, 100);
+
   await insert("national_summaries", summaryRows);
 
   // ---- supporting documents ---------------------------------------------------

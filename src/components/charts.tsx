@@ -6,7 +6,7 @@
 import { useId } from "react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, AreaChart, Area,
-  PieChart, Pie, XAxis, YAxis, CartesianGrid, Tooltip, Cell, LabelList,
+  PieChart, Pie, XAxis, YAxis, CartesianGrid, Tooltip, Cell, LabelList, Legend,
 } from "recharts";
 
 const AXIS = "var(--muted-foreground)";
@@ -194,18 +194,48 @@ export function RingProgress({
 }
 
 /** Small hero-card chart — gradient fill "pooling" under the line. No axes. */
+function GradientAreaTooltip({
+  active,
+  payload,
+  unit,
+}: {
+  active?: boolean;
+  payload?: { payload?: { label?: string; v?: number } }[];
+  unit?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload;
+  if (!p) return null;
+  return (
+    <div className="rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs shadow-md">
+      {p.label && <p className="font-medium">{p.label}</p>}
+      <p className="text-muted-foreground tabular-nums">
+        {(p.v ?? 0).toLocaleString("en-KE")}
+        {unit === "%" ? "%" : unit ? ` ${unit}` : ""}
+      </p>
+    </div>
+  );
+}
+
 export function GradientArea({
   data,
+  labels,
+  unit,
   tone = "brand",
   height = 56,
+  showTooltip = false,
 }: {
   data: number[];
+  /** Optional per-point label (e.g. year) shown in the hover tooltip. */
+  labels?: string[];
+  unit?: string;
   tone?: Tone;
   height?: number;
+  showTooltip?: boolean;
 }) {
   const rid = useId().replace(/[:]/g, "");
   const color = TONE_VAR[tone];
-  const points = data.map((v, i) => ({ i, v }));
+  const points = data.map((v, i) => ({ i, v, label: labels?.[i] }));
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={points} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
@@ -215,6 +245,13 @@ export function GradientArea({
             <stop offset="100%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
+        {showTooltip && (
+          <Tooltip
+            content={<GradientAreaTooltip unit={unit} />}
+            cursor={{ stroke: color, strokeOpacity: 0.3 }}
+            wrapperStyle={{ zIndex: 50 }}
+          />
+        )}
         <Area
           type="monotone"
           dataKey="v"
@@ -222,8 +259,51 @@ export function GradientArea({
           strokeWidth={2}
           fill={`url(#grad-${rid})`}
           isAnimationActive={false}
+          activeDot={{ r: 3.5 }}
         />
       </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Small hero-card chart — gradient bars, same "pooling" fade as GradientArea. */
+export function GradientBars({
+  data,
+  labels,
+  unit,
+  tone = "brand",
+  height = 56,
+  showTooltip = false,
+}: {
+  data: number[];
+  /** Optional per-point label (e.g. year) shown in the hover tooltip. */
+  labels?: string[];
+  unit?: string;
+  tone?: Tone;
+  height?: number;
+  showTooltip?: boolean;
+}) {
+  const rid = useId().replace(/[:]/g, "");
+  const color = TONE_VAR[tone];
+  const points = data.map((v, i) => ({ i, v, label: labels?.[i] }));
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={points} margin={{ top: 4, right: 0, bottom: 0, left: 0 }} barCategoryGap="25%">
+        <defs>
+          <linearGradient id={`gradbar-${rid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.9} />
+            <stop offset="100%" stopColor={color} stopOpacity={0.15} />
+          </linearGradient>
+        </defs>
+        {showTooltip && (
+          <Tooltip
+            content={<GradientAreaTooltip unit={unit} />}
+            cursor={{ fill: color, fillOpacity: 0.08 }}
+            wrapperStyle={{ zIndex: 50 }}
+          />
+        )}
+        <Bar dataKey="v" fill={`url(#gradbar-${rid})`} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+      </BarChart>
     </ResponsiveContainer>
   );
 }
@@ -323,7 +403,7 @@ export function GradientRankBar({ data, unit }: { data: Point[]; unit?: string }
             return (
               <Cell
                 key={i}
-                fill={`color-mix(in oklch, var(--brand) ${Math.round((1 - t) * 100)}%, var(--warning) ${Math.round(t * 100)}%)`}
+                fill={`color-mix(in oklab, var(--brand) ${Math.round((1 - t) * 100)}%, var(--warning) ${Math.round(t * 100)}%)`}
               />
             );
           })}
@@ -375,33 +455,185 @@ function DonutTooltip({
 }
 
 /** Donut with a soft glow behind the ring — for a technology/fuel-type split. */
-export function DonutChart({ data, unit }: { data: DonutSlice[]; unit?: string }) {
+export function DonutChart({
+  data,
+  unit,
+  centerLabel,
+  height = 220,
+}: {
+  data: DonutSlice[];
+  unit?: string;
+  /** Shown in the middle of the ring — typically the real total. */
+  centerLabel?: { value: string; caption?: string };
+  height?: number;
+}) {
   const rid = useId().replace(/[:]/g, "");
   const total = data.reduce((a, b) => a + b.value, 0);
   return (
-    <ResponsiveContainer width="100%" height={220}>
-      <PieChart>
+    <div className="relative">
+      <ResponsiveContainer width="100%" height={height}>
+        <PieChart>
+          <defs>
+            <filter id={`glow-${rid}`} x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="0" dy="3" stdDeviation="8" floodColor="var(--brand)" floodOpacity="0.22" />
+            </filter>
+          </defs>
+          <Pie
+            data={data}
+            dataKey="value"
+            nameKey="label"
+            innerRadius="58%"
+            outerRadius="85%"
+            paddingAngle={2}
+            isAnimationActive={false}
+            filter={`url(#glow-${rid})`}
+          >
+            {data.map((d, i) => (
+              <Cell key={i} fill={d.color} stroke="var(--card)" strokeWidth={2} />
+            ))}
+          </Pie>
+          <Tooltip content={<DonutTooltip unit={unit} total={total} />} />
+        </PieChart>
+      </ResponsiveContainer>
+      {centerLabel && (
+        <div className="absolute inset-0 grid place-items-center pointer-events-none">
+          <div className="text-center">
+            <p className="text-xl font-semibold tabular-nums leading-tight">{centerLabel.value}</p>
+            {centerLabel.caption && <p className="text-[11px] text-muted-foreground">{centerLabel.caption}</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Large full-width area chart with axes — the "top of the report" hero chart. */
+export function BigGradientArea({
+  data,
+  unit,
+  tone = "brand",
+  height = 320,
+}: {
+  data: Point[];
+  unit?: string;
+  tone?: Tone;
+  height?: number;
+}) {
+  const rid = useId().replace(/[:]/g, "");
+  const color = TONE_VAR[tone];
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
         <defs>
-          <filter id={`glow-${rid}`} x="-50%" y="-50%" width="200%" height="200%">
-            <feDropShadow dx="0" dy="3" stdDeviation="8" floodColor="var(--brand)" floodOpacity="0.22" />
-          </filter>
+          <linearGradient id={`big-${rid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
         </defs>
-        <Pie
-          data={data}
+        <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="label" stroke={AXIS} fontSize={12} tickLine={false} axisLine={false} />
+        <YAxis stroke={AXIS} fontSize={12} tickLine={false} axisLine={false} width={52} />
+        <Tooltip content={<TooltipBox unit={unit} />} cursor={{ stroke: GRID }} />
+        <Area
+          type="monotone"
           dataKey="value"
-          nameKey="label"
-          innerRadius="58%"
-          outerRadius="85%"
-          paddingAngle={2}
+          stroke={color}
+          strokeWidth={2.5}
+          fill={`url(#big-${rid})`}
+          dot={{ r: 3, fill: color, strokeWidth: 0 }}
+          activeDot={{ r: 5 }}
           isAnimationActive={false}
-          filter={`url(#glow-${rid})`}
-        >
-          {data.map((d, i) => (
-            <Cell key={i} fill={d.color} stroke="var(--card)" strokeWidth={2} />
-          ))}
-        </Pie>
-        <Tooltip content={<DonutTooltip unit={unit} total={total} />} />
-      </PieChart>
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+export interface MonthlyPoint {
+  label: string;
+  actual: number;
+  target: number;
+}
+
+function MonthlyTooltip({
+  active,
+  payload,
+  label,
+  unit,
+}: {
+  active?: boolean;
+  payload?: { name?: string; value?: number; color?: string }[];
+  label?: string;
+  unit?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs shadow-md space-y-1">
+      <p className="font-medium">{label}</p>
+      {payload.map((p, i) => (
+        <p key={i} className="flex items-center gap-1.5">
+          <span className="inline-block size-2 rounded-full shrink-0" style={{ background: p.color }} />
+          <span className="text-muted-foreground">{p.name}:</span>
+          <span className="font-medium tabular-nums ml-auto">
+            {(p.value ?? 0).toLocaleString("en-KE")}
+            {unit ? ` ${unit}` : ""}
+          </span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/** Twelve months of actuals against a target/benchmark line, EPRA-report style. */
+export function MonthlyBenchmarkChart({
+  data,
+  unit,
+  tone = "brand",
+  height = 280,
+}: {
+  data: MonthlyPoint[];
+  unit?: string;
+  tone?: Tone;
+  height?: number;
+}) {
+  const rid = useId().replace(/[:]/g, "");
+  const color = TONE_VAR[tone];
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
+        <defs>
+          <linearGradient id={`mb-${rid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.3} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="label" stroke={AXIS} fontSize={12} tickLine={false} axisLine={false} />
+        <YAxis stroke={AXIS} fontSize={12} tickLine={false} axisLine={false} width={48} />
+        <Tooltip content={<MonthlyTooltip unit={unit} />} cursor={{ stroke: GRID }} />
+        <Legend verticalAlign="top" align="right" height={28} iconType="plainline" wrapperStyle={{ fontSize: 12 }} />
+        <Area
+          type="monotone"
+          dataKey="actual"
+          name="Actual"
+          stroke={color}
+          strokeWidth={2.5}
+          fill={`url(#mb-${rid})`}
+          dot={{ r: 3, fill: color, strokeWidth: 0 }}
+          activeDot={{ r: 5 }}
+          isAnimationActive={false}
+        />
+        <Line
+          type="monotone"
+          dataKey="target"
+          name="Target"
+          stroke="var(--muted-foreground)"
+          strokeWidth={2}
+          strokeDasharray="5 4"
+          dot={false}
+          isAnimationActive={false}
+        />
+      </AreaChart>
     </ResponsiveContainer>
   );
 }

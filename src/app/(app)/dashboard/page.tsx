@@ -1,6 +1,8 @@
 import { requireProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { DashboardClient, type ValueRow } from "./dashboard-client";
+import { DashboardClient, type ValueRow, type EpraRow } from "./dashboard-client";
+import { EPRA_SLUGS } from "./epra-config";
+import type { MapPoint } from "./point-map";
 
 export default async function DashboardPage() {
   await requireProfile();
@@ -12,7 +14,7 @@ export default async function DashboardPage() {
       .from("indicators")
       .select("id, name, slug, unit, sector_id, sort_order, expected_min, expected_max")
       .order("sort_order"),
-    supabase.from("submitters").select("id, name").eq("type", "county").order("name"),
+    supabase.from("submitters").select("id, name, region").eq("type", "county").order("name"),
   ]);
 
   const countyIds = (counties ?? []).map((c) => c.id);
@@ -88,6 +90,71 @@ export default async function DashboardPage() {
       };
     });
 
+  // EPRA "Year at a Glance" hero-row series — real national context figures,
+  // never derived from county submissions (see scripts/data.ts EPRA_INDICATORS).
+  const epraIndicatorIds = (indicators ?? []).filter((i) => EPRA_SLUGS.includes(i.slug)).map((i) => i.id);
+  const { data: epraSummaries } = epraIndicatorIds.length
+    ? await supabase
+        .from("national_summaries")
+        .select("indicator_id, period_year, aggregated_value")
+        .eq("source", "epra_national")
+        .in("indicator_id", epraIndicatorIds)
+        .order("period_year")
+    : { data: [] as { indicator_id: string; period_year: number; aggregated_value: number }[] };
+  const epraRows: EpraRow[] = (epraSummaries ?? []).map((e) => ({
+    indicatorId: e.indicator_id,
+    year: e.period_year,
+    value: e.aggregated_value,
+  }));
+
+  // Latest real submission per county — for the choropleth's click-through.
+  const submissionIdByCounty = new Map<string, string>();
+  submissionByCountyYear.forEach((s) => {
+    const cur = submissionIdByCounty.get(s.submitter_id);
+    const curYear = cur ? submissionMeta.get(cur)?.year ?? 0 : -1;
+    if (s.period_year >= curYear) submissionIdByCounty.set(s.submitter_id, s.id);
+  });
+
+  // Provider + private-sector points for the point map — only ones with real
+  // GPS coordinates captured in submitters.profile are ever placed.
+  const { data: mapSubmitters } = await supabase
+    .from("submitters")
+    .select("id, name, type, profile")
+    .in("type", ["national_provider", "private_sector"]);
+
+  const { data: mapSubmissions } = mapSubmitters?.length
+    ? await supabase
+        .from("submissions")
+        .select("id, submitter_id, created_at")
+        .in(
+          "submitter_id",
+          mapSubmitters.map((m) => m.id)
+        )
+        .order("created_at", { ascending: false })
+    : { data: [] as { id: string; submitter_id: string; created_at: string }[] };
+  const latestSubmissionBySubmitter = new Map<string, string>();
+  (mapSubmissions ?? []).forEach((s) => {
+    if (!latestSubmissionBySubmitter.has(s.submitter_id)) latestSubmissionBySubmitter.set(s.submitter_id, s.id);
+  });
+
+  let missingLocationCount = 0;
+  const mapPoints: MapPoint[] = [];
+  (mapSubmitters ?? []).forEach((s) => {
+    const profile = (s.profile ?? {}) as { gps_lat?: number; gps_lng?: number };
+    if (profile.gps_lat == null || profile.gps_lng == null) {
+      missingLocationCount += 1;
+      return;
+    }
+    mapPoints.push({
+      id: s.id,
+      name: s.name,
+      type: s.type as "national_provider" | "private_sector",
+      lat: profile.gps_lat,
+      lng: profile.gps_lng,
+      href: latestSubmissionBySubmitter.get(s.id) ? `/submissions/${latestSubmissionBySubmitter.get(s.id)}` : null,
+    });
+  });
+
   return (
     <DashboardClient
       sectors={(sectors ?? []).map((s) => ({ id: s.id, name: s.name, slug: s.slug }))}
@@ -98,8 +165,12 @@ export default async function DashboardPage() {
         unit: i.unit,
         sectorId: i.sector_id,
       }))}
-      counties={(counties ?? []).map((c) => ({ id: c.id, name: c.name }))}
+      counties={(counties ?? []).map((c) => ({ id: c.id, name: c.name, region: c.region }))}
       valueRows={valueRows}
+      epraRows={epraRows}
+      countySubmissionIds={Object.fromEntries(submissionIdByCounty)}
+      mapPoints={mapPoints}
+      missingLocationCount={missingLocationCount}
     />
   );
 }

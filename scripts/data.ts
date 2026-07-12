@@ -104,12 +104,15 @@ export const SAMPLE_WARDS: Record<string, { sub_county: string; name: string }[]
 // ---------------------------------------------------------------------------
 // National energy service providers
 // ---------------------------------------------------------------------------
-export const PROVIDERS: { code: string; name: string; region: string }[] = [
-  { code: "KPLC", name: "Kenya Power & Lighting Company", region: "National" },
-  { code: "KENGEN", name: "Kenya Electricity Generating Company", region: "National" },
-  { code: "REREC", name: "Rural Electrification & Renewable Energy Corporation", region: "National" },
-  { code: "KETRACO", name: "Kenya Electricity Transmission Company", region: "National" },
-  { code: "GDC", name: "Geothermal Development Company", region: "National" },
+// gps_lat/gps_lng are city-level HQ coordinates (all five are genuinely
+// Nairobi-headquartered), not exact building/facility GPS — precision noted
+// wherever these are surfaced on the point map.
+export const PROVIDERS: { code: string; name: string; region: string; gps_lat: number; gps_lng: number }[] = [
+  { code: "KPLC", name: "Kenya Power & Lighting Company", region: "National", gps_lat: -1.2762, gps_lng: 36.8172 },
+  { code: "KENGEN", name: "Kenya Electricity Generating Company", region: "National", gps_lat: -1.2833, gps_lng: 36.8172 },
+  { code: "REREC", name: "Rural Electrification & Renewable Energy Corporation", region: "National", gps_lat: -1.2921, gps_lng: 36.8219 },
+  { code: "KETRACO", name: "Kenya Electricity Transmission Company", region: "National", gps_lat: -1.2667, gps_lng: 36.8000 },
+  { code: "GDC", name: "Geothermal Development Company", region: "National", gps_lat: -1.3, gps_lng: 36.78 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -235,6 +238,112 @@ export const INDICATORS: IndicatorSeed[] = [
   { sector: "resource_dev", slug: "feasibility_studies", name: "Feasibility studies", unit: "studies", expected_min: 0, expected_max: 100, base: 4, kind: "absolute", description: "Energy feasibility studies completed", sort_order: 1 },
   { sector: "resource_dev", slug: "rd_budget_kes_m", name: "Energy budget", unit: "KES millions", expected_min: 0, expected_max: 2000, base: 85, kind: "absolute", description: "County energy budget allocation", sort_order: 2 },
   { sector: "resource_dev", slug: "staff_trained", name: "Staff trained", unit: "people", expected_min: 0, expected_max: 5000, base: 40, kind: "absolute", description: "Energy staff trained in the period", sort_order: 3 },
+];
+
+// ---------------------------------------------------------------------------
+// EPRA "Year at a Glance" indicators — national-level context figures, never
+// tied to a county submission. Kept as a separate catalog from INDICATORS so
+// they're never included in a county/provider/private submission's field
+// list; they only ever appear as national_summaries rows with
+// source = 'epra_national', same as the pre-existing avg_tariff_kwh/
+// installed_capacity_mw EPRA figures.
+// ---------------------------------------------------------------------------
+export interface EpraIndicatorSeed {
+  slug: string;
+  name: string;
+  unit: string;
+  sector: string; // FK convenience only — these never appear on a submission form
+  description: string;
+}
+
+export const EPRA_INDICATORS: EpraIndicatorSeed[] = [
+  { slug: "energy_generated_gwh", name: "Energy Generated", unit: "GWh", sector: "electricity", description: "National electricity generation, EPRA Year at a Glance." },
+  { slug: "renewable_share_pct", name: "Renewable Share of Capacity", unit: "%", sector: "electricity", description: "Renewable share of installed generation capacity, EPRA." },
+  { slug: "peak_demand_mw", name: "Peak Demand", unit: "MW", sector: "electricity", description: "National system peak demand, EPRA." },
+  { slug: "tou_savings_kes_m", name: "TOU Savings", unit: "KES M", sector: "efficiency", description: "Estimated consumer savings from time-of-use tariffs, EPRA." },
+  { slug: "lpg_demand_growth_pct", name: "LPG Demand Growth", unit: "%", sector: "bioenergy", description: "Year-on-year growth in LPG consumption, EPRA." },
+  { slug: "petroleum_demand_growth_pct", name: "Petroleum Demand Growth", unit: "%", sector: "resource_dev", description: "Year-on-year growth in petroleum products demand, EPRA." },
+
+  // Generation mix by source — one snapshot each, installed capacity in MW.
+  { slug: "mix_geothermal_mw", name: "Geothermal", unit: "MW", sector: "electricity", description: "Installed geothermal capacity, EPRA generation mix." },
+  { slug: "mix_hydro_mw", name: "Hydro", unit: "MW", sector: "electricity", description: "Installed hydro capacity, EPRA generation mix." },
+  { slug: "mix_wind_mw", name: "Wind", unit: "MW", sector: "electricity", description: "Installed wind capacity, EPRA generation mix." },
+  { slug: "mix_solar_mw", name: "Solar", unit: "MW", sector: "electricity", description: "Installed solar capacity, EPRA generation mix." },
+  { slug: "mix_thermal_mw", name: "Thermal", unit: "MW", sector: "electricity", description: "Installed thermal capacity, EPRA generation mix." },
+  { slug: "mix_imports_mw", name: "Imports", unit: "MW", sector: "electricity", description: "Imported capacity / interconnection, EPRA generation mix." },
+
+  // Monthly generation vs. target for the current financial year. There's no
+  // month column anywhere in the schema, so — for these two indicators only —
+  // national_summaries.period_year is repurposed to hold FY-month-order
+  // (1 = Jul .. 12 = Jun), not a real calendar year. This encoding never
+  // leaves the two queries that explicitly know about it.
+  { slug: "monthly_generation_gwh", name: "Monthly Generation", unit: "GWh", sector: "electricity", description: "Monthly generation for the current FY, EPRA. period_year 1-12 = FY month order (Jul..Jun), not a calendar year." },
+  { slug: "monthly_generation_target_gwh", name: "Monthly Generation Target", unit: "GWh", sector: "electricity", description: "EPRA's monthly generation benchmark for the current FY. Same period_year-as-month-order encoding." },
+
+  // ---- Overview tab: growth-vs-economy context ----------------------------
+  { slug: "gdp_growth_pct", name: "GDP Growth", unit: "%", sector: "electricity", description: "National GDP growth rate, for comparison against generation growth, EPRA/KNBS. National context." },
+  { slug: "per_capita_consumption_kwh", name: "Per Capita Electricity Consumption", unit: "kWh", sector: "electricity", description: "National electricity consumption per capita, EPRA. National context." },
+
+  // ---- Electricity tab: reliability, tariffs, market structure, emissions ----
+  { slug: "system_losses_pct", name: "System Losses", unit: "%", sector: "electricity", description: "Transmission + distribution losses, EPRA. National context, not a county rollup." },
+  { slug: "saidi_hours", name: "SAIDI", unit: "hrs/customer/yr", sector: "electricity", description: "System Average Interruption Duration Index, EPRA. National context." },
+  { slug: "saifi_count", name: "SAIFI", unit: "interruptions/customer/yr", sector: "electricity", description: "System Average Interruption Frequency Index, EPRA. National context." },
+  { slug: "avg_tariff_trend_kes_kwh", name: "Average Tariff", unit: "KES/kWh", sector: "electricity", description: "National average end-user tariff over time, EPRA. National context." },
+  { slug: "hhi_index", name: "Market Concentration (HHI)", unit: "index (0-10,000)", sector: "electricity", description: "Herfindahl-Hirschman Index for the generation market, EPRA. National context." },
+  { slug: "ghg_emissions_mtco2e", name: "Power Sector GHG Emissions", unit: "MtCO2e", sector: "electricity", description: "Grid emissions, EPRA. National context." },
+  { slug: "daily_demand_profile_mw", name: "Daily Demand Profile", unit: "MW", sector: "electricity", description: "Typical-day hourly system demand, EPRA. period_year 0-23 = hour of day, not a calendar year. National context." },
+
+  // Final consumption by category — one 6-year trend per category. Reused as
+  // a current-year snapshot bar (Electricity tab) and as the multi-year trend
+  // itself (Energy Balance tab), so the same real seeded series backs both.
+  { slug: "final_consumption_residential_gwh", name: "Residential", unit: "GWh", sector: "electricity", description: "Final electricity consumption, residential category, EPRA. National context." },
+  { slug: "final_consumption_commercial_gwh", name: "Commercial", unit: "GWh", sector: "electricity", description: "Final electricity consumption, commercial category, EPRA. National context." },
+  { slug: "final_consumption_industrial_gwh", name: "Industrial", unit: "GWh", sector: "electricity", description: "Final electricity consumption, industrial category, EPRA. National context." },
+  { slug: "final_consumption_transport_gwh", name: "Transport", unit: "GWh", sector: "electricity", description: "Final electricity consumption, transport category (e-mobility), EPRA. National context." },
+
+  // ---- Renewable Energy tab: per-source generation trend + EAC comparison ---
+  { slug: "gen_geothermal_gwh", name: "Geothermal Generation", unit: "GWh", sector: "electricity", description: "Geothermal generation over time, EPRA. National context." },
+  { slug: "gen_hydro_gwh", name: "Hydro Generation", unit: "GWh", sector: "electricity", description: "Hydro generation over time, EPRA. National context." },
+  { slug: "gen_wind_gwh", name: "Wind Generation", unit: "GWh", sector: "electricity", description: "Wind generation over time, EPRA. National context." },
+  { slug: "gen_solar_gwh", name: "Solar Generation", unit: "GWh", sector: "electricity", description: "Solar generation over time, EPRA. National context." },
+  { slug: "eac_access_kenya", name: "Kenya", unit: "%", sector: "electricity", description: "Electricity access rate, Kenya. EAC regional comparison, national context." },
+  { slug: "eac_access_uganda", name: "Uganda", unit: "%", sector: "electricity", description: "Electricity access rate, Uganda. EAC regional comparison, national context." },
+  { slug: "eac_access_tanzania", name: "Tanzania", unit: "%", sector: "electricity", description: "Electricity access rate, Tanzania. EAC regional comparison, national context." },
+  { slug: "eac_access_rwanda", name: "Rwanda", unit: "%", sector: "electricity", description: "Electricity access rate, Rwanda. EAC regional comparison, national context." },
+  { slug: "eac_access_ethiopia", name: "Ethiopia", unit: "%", sector: "electricity", description: "Electricity access rate, Ethiopia. EAC regional comparison, national context." },
+
+  // ---- Efficiency tab -------------------------------------------------------
+  { slug: "avg_appliance_star_rating", name: "Average Appliance Star Rating", unit: "stars", sector: "efficiency", description: "Average energy-label star rating of appliances sold, EPRA/KEBS. National context." },
+
+  // ---- Petroleum tab ---------------------------------------------------------
+  { slug: "petroleum_import_volume_kt", name: "Petroleum Import Volume", unit: "kt", sector: "resource_dev", description: "Refined petroleum products import volume, EPRA. National context." },
+  { slug: "pipeline_throughput_kt", name: "Pipeline Throughput", unit: "kt", sector: "resource_dev", description: "Kenya Pipeline Company throughput, EPRA. National context." },
+  { slug: "crude_oil_price_usd_bbl", name: "Crude Oil Price", unit: "USD/bbl", sector: "resource_dev", description: "Benchmark crude price, EPRA. National context." },
+  { slug: "pump_price_petrol_kes_l", name: "Super Petrol Pump Price", unit: "KES/L", sector: "resource_dev", description: "EPRA-gazetted pump price, super petrol. National context." },
+  { slug: "pump_price_diesel_kes_l", name: "Diesel Pump Price", unit: "KES/L", sector: "resource_dev", description: "EPRA-gazetted pump price, automotive diesel. National context." },
+  { slug: "pump_price_kerosene_kes_l", name: "Kerosene Pump Price", unit: "KES/L", sector: "resource_dev", description: "EPRA-gazetted pump price, illuminating kerosene. National context." },
+  { slug: "omc_share_vivo", name: "Vivo Energy (Shell)", unit: "%", sector: "resource_dev", description: "Oil marketing company market share, EPRA. National context." },
+  { slug: "omc_share_totalenergies", name: "TotalEnergies", unit: "%", sector: "resource_dev", description: "Oil marketing company market share, EPRA. National context." },
+  { slug: "omc_share_rubis", name: "Rubis Energy", unit: "%", sector: "resource_dev", description: "Oil marketing company market share, EPRA. National context." },
+  { slug: "omc_share_ola", name: "Ola Energy", unit: "%", sector: "resource_dev", description: "Oil marketing company market share, EPRA. National context." },
+  { slug: "omc_share_others", name: "Other OMCs", unit: "%", sector: "resource_dev", description: "Remaining oil marketing companies, combined market share, EPRA. National context." },
+
+  // ---- LPG tab -----------------------------------------------------------------
+  { slug: "lpg_import_volume_kt", name: "LPG Import Volume", unit: "kt", sector: "bioenergy", description: "LPG import volume over time, EPRA. National context." },
+  { slug: "lpg_consumption_kt", name: "Monthly LPG Consumption", unit: "kt", sector: "bioenergy", description: "Monthly LPG consumption for the current FY, EPRA. period_year 1-12 = FY month order. National context." },
+  { slug: "lpg_consumption_target_kt", name: "Monthly LPG Consumption Target", unit: "kt", sector: "bioenergy", description: "EPRA's monthly LPG consumption benchmark. Same month-order encoding. National context." },
+  { slug: "lpg_import_route_mombasa_pct", name: "Mombasa Port", unit: "%", sector: "bioenergy", description: "Share of LPG imports landed at Mombasa, EPRA. National context." },
+  { slug: "lpg_import_route_overland_pct", name: "Overland (Uganda/Tanzania)", unit: "%", sector: "bioenergy", description: "Share of LPG imports arriving overland, EPRA. National context." },
+  { slug: "storage_mombasa_kt", name: "Mombasa", unit: "kt", sector: "bioenergy", description: "LPG storage capacity, Mombasa depot, EPRA. National context." },
+  { slug: "storage_nairobi_kt", name: "Nairobi", unit: "kt", sector: "bioenergy", description: "LPG storage capacity, Nairobi depot, EPRA. National context." },
+  { slug: "storage_kisumu_kt", name: "Kisumu", unit: "kt", sector: "bioenergy", description: "LPG storage capacity, Kisumu depot, EPRA. National context." },
+  { slug: "storage_nakuru_kt", name: "Nakuru", unit: "kt", sector: "bioenergy", description: "LPG storage capacity, Nakuru depot, EPRA. National context." },
+  { slug: "storage_eldoret_kt", name: "Eldoret", unit: "kt", sector: "bioenergy", description: "LPG storage capacity, Eldoret depot, EPRA. National context." },
+
+  // ---- Consumer Protection tab -------------------------------------------------
+  { slug: "licensing_volume", name: "Licenses Issued", unit: "licenses", sector: "resource_dev", description: "Energy sector licenses issued by EPRA per year. National context." },
+  { slug: "compliance_rate_pct", name: "Compliance Rate", unit: "%", sector: "resource_dev", description: "Licensee compliance rate on inspection, EPRA. National context." },
+  { slug: "complaints_resolved_pct", name: "Complaints Resolved", unit: "%", sector: "resource_dev", description: "Consumer complaints resolved within SLA, EPRA. National context." },
 ];
 
 // ---------------------------------------------------------------------------

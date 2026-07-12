@@ -4,38 +4,47 @@ import { useCallback, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  GradientArea, MultiCountyArea, GradientRankBar, DonutChart,
-  type AreaSeriesDef, type DonutSlice, type Tone,
+  MultiCountyArea, GradientRankBar, DonutChart, BigGradientArea, MonthlyBenchmarkChart,
+  type AreaSeriesDef, type DonutSlice, type Tone, type MonthlyPoint,
 } from "@/components/charts";
+import { HeroStatCard } from "@/components/hero-stat-card";
+import { NationalContextBadge } from "@/components/national-context-badge";
 import { runDashboardInsight, type DashboardInsightChip } from "@/lib/agents";
 import { fmtNum } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { Download, ArrowUpRight, ArrowDownRight, Activity } from "lucide-react";
+import { EPRA_MIX_SLUGS, FY_MONTH_LABELS, GDP_GROWTH_SLUG, PER_CAPITA_CONSUMPTION_SLUG } from "./epra-config";
+import { epraSeriesFor, type Sector, type Indicator, type County, type ValueRow, type EpraRow } from "./dashboard-types";
+import { ChoroplethMap, ChoroplethLegend, type ChoroplethCounty } from "./choropleth-map";
+import { PointMap, PointMapLegend, type MapPoint } from "./point-map";
+import { ElectricityTab } from "./electricity-tab";
+import { RenewableTab } from "./renewable-tab";
+import { EfficiencyTab } from "./efficiency-tab";
+import { PetroleumTab } from "./petroleum-tab";
+import { LpgTab } from "./lpg-tab";
+import { EnergyBalanceTab } from "./energy-balance-tab";
+import { ConsumerProtectionTab } from "./consumer-protection-tab";
+import {
+  Download, ArrowUpRight, ArrowDownRight, Activity,
+  Zap, Leaf, Gauge, PiggyBank, Flame, Fuel, TrendingUp, Users,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-export interface Sector {
-  id: string;
-  name: string;
-  slug: string;
-}
-export interface Indicator {
-  id: string;
-  name: string;
-  slug: string;
-  unit: string;
-  sectorId: string;
-}
-export interface County {
-  id: string;
-  name: string;
-}
-export interface ValueRow {
-  countyId: string;
-  countyName: string;
-  indicatorId: string;
-  year: number;
-  value: number;
-}
+export type { Sector, Indicator, County, ValueRow, EpraRow };
+
+// EPRA "Year at a Glance" hero row — fixed order, icon, and accent per card.
+// These are national context figures (see scripts/data.ts EPRA_INDICATORS),
+// independent of the sector filter below. The slug list itself lives in
+// epra-config.ts (a plain module) so the server page can import it too.
+const EPRA_HERO: { slug: string; icon: LucideIcon; tone: Tone }[] = [
+  { slug: "energy_generated_gwh", icon: Zap, tone: "brand" },
+  { slug: "renewable_share_pct", icon: Leaf, tone: "success" },
+  { slug: "peak_demand_mw", icon: Gauge, tone: "provider" },
+  { slug: "tou_savings_kes_m", icon: PiggyBank, tone: "agent" },
+  { slug: "lpg_demand_growth_pct", icon: Flame, tone: "warning" },
+  { slug: "petroleum_demand_growth_pct", icon: Fuel, tone: "danger" },
+];
 // Representative metric per sector — direct if the unit is %, otherwise
 // min-max normalized across counties. `invert` means "lower is better."
 const PRIMARY_BY_SECTOR: Record<string, { slug: string; invert?: boolean }> = {
@@ -47,7 +56,16 @@ const PRIMARY_BY_SECTOR: Record<string, { slug: string; invert?: boolean }> = {
 };
 
 const CHART_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
-const HERO_TONES: Tone[] = ["provider", "brand", "warning", "agent"];
+
+// Options for the big top-of-report area chart — the four EPRA "level" hero
+// metrics (excludes the two growth-rate indicators, which don't read well as
+// a big multi-year level chart).
+const AREA_METRIC_OPTIONS = [
+  { slug: "energy_generated_gwh", label: "Energy Generated" },
+  { slug: "peak_demand_mw", label: "Peak Demand" },
+  { slug: "renewable_share_pct", label: "Renewable Share of Capacity" },
+  { slug: "tou_savings_kes_m", label: "TOU Savings" },
+];
 
 function csvEscape(v: string | number): string {
   const s = String(v);
@@ -59,11 +77,19 @@ export function DashboardClient({
   indicators,
   counties,
   valueRows,
+  epraRows,
+  countySubmissionIds,
+  mapPoints,
+  missingLocationCount,
 }: {
   sectors: Sector[];
   indicators: Indicator[];
   counties: County[];
   valueRows: ValueRow[];
+  epraRows: EpraRow[];
+  countySubmissionIds: Record<string, string>;
+  mapPoints: MapPoint[];
+  missingLocationCount: number;
 }) {
   const years = useMemo(() => [...new Set(valueRows.map((v) => v.year))].sort(), [valueRows]);
   const minYear = years[0] ?? new Date().getFullYear();
@@ -75,6 +101,7 @@ export function DashboardClient({
   const [compareCounties, setCompareCounties] = useState<string[] | null>(null);
   const [sortCol, setSortCol] = useState("score");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
+  const [areaMetricSlug, setAreaMetricSlug] = useState("energy_generated_gwh");
 
   const indicatorBySlug = useMemo(() => new Map(indicators.map((i) => [i.slug, i])), [indicators]);
   const countyNameById = useMemo(() => new Map(counties.map((c) => [c.id, c.name])), [counties]);
@@ -120,7 +147,7 @@ export function DashboardClient({
   const activeSectors = sectorSlug === "all" ? sectors : sectors.filter((s) => s.slug === sectorSlug);
   const currentSector = sectors.find((s) => s.slug === sectorSlug) ?? null;
 
-  // the indicator(s) driving hero cards / heatmap / ranking for the current selection
+  // the indicator(s) driving the heatmap / ranking / insight for the current selection
   const primaryIndicatorsForSelection = useMemo(() => {
     return activeSectors
       .map((s) => {
@@ -177,29 +204,55 @@ export function DashboardClient({
     [countyScores]
   );
 
-  // Real scores tend to cluster in a narrow band — rescale to the observed
-  // min/max so the heatmap's color range actually spans teal to red instead
-  // of sitting flat in the middle of a fixed 0-100 scale.
-  const scoreRange = useMemo(() => {
-    const vals = countyScores.map((c) => c.score).filter((s): s is number => s != null);
-    return vals.length ? { min: Math.min(...vals), max: Math.max(...vals) } : { min: 0, max: 100 };
-  }, [countyScores]);
+  // ---- choropleth map: same score pipeline as the heatmap, real county
+  // shapes instead of squares, no-data counties left honestly unshaded. ------
+  const choroplethData: ChoroplethCounty[] = useMemo(
+    () =>
+      countyScores.map(({ county, score, rawPrimary }) => ({
+        name: county.name,
+        score,
+        rawValue: singlePrimary ? rawPrimary : score,
+        submissionId: countySubmissionIds[county.id] ?? null,
+      })),
+    [countyScores, singlePrimary, countySubmissionIds]
+  );
 
-  // ---- hero cards -----------------------------------------------------------
-  const heroIndicators = sectorSlug === "all"
-    ? primaryIndicatorsForSelection.slice(0, 4).map((p) => p.indicator)
-    : (indicatorsBySector.get(currentSector?.id ?? "") ?? []).slice(0, 4);
+  // Population-weighted national average — uses the real `population_served`
+  // indicator as a size proxy (no census population column exists in the
+  // schema) so a large county doesn't count the same as a tiny one.
+  const populationIndicator = indicatorBySlug.get("population_served");
+  const populationWeightedAvg = useMemo(() => {
+    if (!singlePrimary || !populationIndicator) return null;
+    let weightedSum = 0;
+    let weightTotal = 0;
+    counties.forEach((c) => {
+      const value = valueMap.get(`${c.id}|${singlePrimary.indicator.id}|${yearTo}`);
+      const weight = valueMap.get(`${c.id}|${populationIndicator.id}|${yearTo}`);
+      if (value == null || weight == null) return;
+      weightedSum += value * weight;
+      weightTotal += weight;
+    });
+    return weightTotal > 0 ? weightedSum / weightTotal : null;
+  }, [singlePrimary, populationIndicator, counties, valueMap, yearTo]);
 
-  const heroCards = heroIndicators.map((ind) => {
-    const series = years
-      .filter((y) => y >= yearFrom && y <= yearTo)
-      .map((y) => nationalByIndicatorYear.get(`${ind.id}|${y}`) ?? null);
-    const clean = series.filter((v): v is number => v != null);
-    const latest = clean[clean.length - 1] ?? null;
-    const prev = clean.length > 1 ? clean[clean.length - 2] : null;
-    const delta = latest != null && prev != null && prev !== 0 ? Math.round(((latest - prev) / prev) * 1000) / 10 : null;
-    return { indicator: ind, series: clean, latest, delta };
-  });
+  // ---- hero row: EPRA "Year at a Glance" — real national context figures,
+  // fixed order/icon/accent, independent of the sector filter above. --------
+  const heroCards = useMemo(
+    () =>
+      EPRA_HERO.map((cfg) => {
+        const ind = indicatorBySlug.get(cfg.slug);
+        if (!ind) return null;
+        const rowsForIndicator = epraRows.filter((e) => e.indicatorId === ind.id).sort((a, b) => a.year - b.year);
+        const series = rowsForIndicator.map((r) => r.value);
+        const labels = rowsForIndicator.map((r) => String(r.year));
+        const latest = series[series.length - 1] ?? null;
+        const prev = series.length > 1 ? series[series.length - 2] : null;
+        const delta =
+          latest != null && prev != null && prev !== 0 ? Math.round(((latest - prev) / prev) * 1000) / 10 : null;
+        return { indicator: ind, icon: cfg.icon, tone: cfg.tone, series, labels, latest, delta };
+      }).filter((h): h is NonNullable<typeof h> => h != null),
+    [indicatorBySlug, epraRows]
+  );
 
   // ---- insight banner ---------------------------------------------------------
   const insight = useMemo(() => {
@@ -244,20 +297,64 @@ export function DashboardClient({
     color: CHART_COLORS[i % CHART_COLORS.length],
   }));
 
-  // ---- donut: technology / fuel-type split, or cross-sector split for "all" ---
-  const donutData: DonutSlice[] = useMemo(() => {
-    if (sectorSlug === "all") {
-      return primaryIndicatorsForSelection.map((p, i) => {
-        const latest = nationalByIndicatorYear.get(`${p.indicator.id}|${yearTo}`) ?? 0;
-        return { label: p.sector.name, value: latest, color: CHART_COLORS[i % CHART_COLORS.length] };
-      });
-    }
-    const sectorIndicators = (indicatorsBySector.get(currentSector?.id ?? "") ?? []).filter((i) => i.unit !== "%");
-    return sectorIndicators.map((ind, i) => {
-      const latest = nationalByIndicatorYear.get(`${ind.id}|${yearTo}`) ?? 0;
-      return { label: ind.name, value: latest, color: CHART_COLORS[i % CHART_COLORS.length] };
+  // ---- main chart set: EPRA "Year at a Glance" report charts ----------------
+  const areaMetricIndicator = indicatorBySlug.get(areaMetricSlug);
+  const areaChartData = useMemo(() => {
+    if (!areaMetricIndicator) return [];
+    return epraRows
+      .filter((e) => e.indicatorId === areaMetricIndicator.id)
+      .sort((a, b) => a.year - b.year)
+      .map((e) => ({ label: String(e.year), value: e.value }));
+  }, [epraRows, areaMetricIndicator]);
+
+  const mixData: DonutSlice[] = useMemo(
+    () =>
+      EPRA_MIX_SLUGS.map((slug, i) => {
+        const ind = indicatorBySlug.get(slug);
+        if (!ind) return null;
+        const row = epraRows.find((e) => e.indicatorId === ind.id);
+        return { label: ind.name, value: row?.value ?? 0, color: CHART_COLORS[i % CHART_COLORS.length] };
+      }).filter((x): x is DonutSlice => x != null),
+    [epraRows, indicatorBySlug]
+  );
+  const mixTotal = mixData.reduce((a, b) => a + b.value, 0);
+
+  const monthlyData: MonthlyPoint[] = useMemo(() => {
+    const actualInd = indicatorBySlug.get("monthly_generation_gwh");
+    const targetInd = indicatorBySlug.get("monthly_generation_target_gwh");
+    if (!actualInd || !targetInd) return [];
+    return FY_MONTH_LABELS.map((label, i) => {
+      const m = i + 1;
+      const actual = epraRows.find((e) => e.indicatorId === actualInd.id && e.year === m)?.value ?? 0;
+      const target = epraRows.find((e) => e.indicatorId === targetInd.id && e.year === m)?.value ?? 0;
+      return { label, actual, target };
     });
-  }, [sectorSlug, primaryIndicatorsForSelection, indicatorsBySector, currentSector, nationalByIndicatorYear, yearTo]);
+  }, [epraRows, indicatorBySlug]);
+
+  // ---- Overview: generation growth vs. GDP growth, per-capita consumption ---
+  const generationVsGdpData = useMemo(() => {
+    const genRows = epraSeriesFor(epraRows, indicatorBySlug, "energy_generated_gwh");
+    const gdpRows = epraSeriesFor(epraRows, indicatorBySlug, GDP_GROWTH_SLUG);
+    const gdpByYear = new Map(gdpRows.map((r) => [r.year, r.value]));
+    return genRows.slice(1).map((r, i) => {
+      const prev = genRows[i].value;
+      const genGrowth = prev !== 0 ? Math.round(((r.value - prev) / prev) * 1000) / 10 : 0;
+      return { label: String(r.year), generation: genGrowth, gdp: gdpByYear.get(r.year) ?? 0 };
+    });
+  }, [epraRows, indicatorBySlug]);
+  const generationVsGdpSeries: AreaSeriesDef[] = [
+    { key: "generation", label: "Generation growth", color: "var(--chart-1)" },
+    { key: "gdp", label: "GDP growth", color: "var(--chart-2)" },
+  ];
+
+  const perCapitaData = useMemo(
+    () =>
+      epraSeriesFor(epraRows, indicatorBySlug, PER_CAPITA_CONSUMPTION_SLUG).map((r) => ({
+        label: String(r.year),
+        value: r.value,
+      })),
+    [epraRows, indicatorBySlug]
+  );
 
   // ---- sortable table -----------------------------------------------------
   const tableIndicators = useMemo(
@@ -364,6 +461,19 @@ export function DashboardClient({
         </div>
       </div>
 
+      <Tabs defaultValue="overview">
+        <TabsList variant="line" className="mb-4 flex-wrap h-auto">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="electricity">Electricity</TabsTrigger>
+          <TabsTrigger value="renewable">Renewable Energy</TabsTrigger>
+          <TabsTrigger value="efficiency">Efficiency</TabsTrigger>
+          <TabsTrigger value="petroleum">Petroleum</TabsTrigger>
+          <TabsTrigger value="lpg">LPG</TabsTrigger>
+          <TabsTrigger value="energy-balance">Energy Balance</TabsTrigger>
+          <TabsTrigger value="consumer-protection">Consumer Protection</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview">
       {/* Insight banner */}
       {insight && (
         <Card className="mb-4 border-brand/15 bg-linear-to-br from-brand/12 via-success/6 to-transparent overflow-hidden">
@@ -391,32 +501,135 @@ export function DashboardClient({
         </Card>
       )}
 
-      {/* Hero stat row */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-4">
-        {heroCards.map((h, i) => (
-          <Card key={h.indicator.id} className="p-5 gap-2 overflow-hidden">
-            <p className="text-xs font-medium text-muted-foreground truncate">{h.indicator.name}</p>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl font-medium tabular-nums">
-                {h.latest != null ? fmtNum(h.latest, h.indicator.unit === "%" ? 1 : 0) : "—"}
-              </span>
-              {h.indicator.unit && <span className="text-sm text-muted-foreground">{h.indicator.unit}</span>}
-            </div>
-            {h.delta != null && (
-              <span
-                className={cn(
-                  "inline-flex items-center gap-0.5 text-xs font-medium w-fit",
-                  h.delta >= 0 ? "text-success" : "text-danger"
-                )}
-              >
-                {h.delta >= 0 ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
-                {Math.abs(h.delta)}%
-              </span>
-            )}
-            <GradientArea data={h.series.length ? h.series : [0, 0]} tone={HERO_TONES[i % HERO_TONES.length]} />
-          </Card>
+      {/* Hero stat row — EPRA "Year at a Glance" */}
+      <div className="flex items-center gap-2 mb-2">
+        <h2 className="text-sm font-medium text-muted-foreground">Year at a glance</h2>
+        <NationalContextBadge />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4">
+        {heroCards.map((h) => (
+          <HeroStatCard
+            key={h.indicator.id}
+            icon={h.icon}
+            tone={h.tone}
+            latest={h.latest}
+            unit={h.indicator.unit}
+            name={h.indicator.name}
+            delta={h.delta}
+            series={h.series}
+            labels={h.labels}
+          />
         ))}
       </div>
+
+      {/* Generation growth vs. GDP growth, per-capita consumption trend */}
+      <div className="grid gap-4 lg:grid-cols-2 mb-4">
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle className="text-base">Generation growth vs. GDP growth</CardTitle>
+            <NationalContextBadge />
+          </CardHeader>
+          <CardContent>
+            <MultiCountyArea data={generationVsGdpData} series={generationVsGdpSeries} unit="%" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle className="text-base">Per capita electricity consumption</CardTitle>
+            <NationalContextBadge />
+          </CardHeader>
+          <CardContent>
+            <BigGradientArea data={perCapitaData} unit="kWh" tone="agent" height={300} />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Main chart set — the four EPRA "Year at a Glance" report charts */}
+      <Card className="mb-4">
+        <CardHeader className="flex-row items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div>
+              <CardTitle className="text-base">{AREA_METRIC_OPTIONS.find((o) => o.slug === areaMetricSlug)?.label}</CardTitle>
+              <p className="text-xs text-muted-foreground">{areaMetricIndicator?.unit}, by year</p>
+            </div>
+            <NationalContextBadge />
+          </div>
+          <Select value={areaMetricSlug} onValueChange={(v) => setAreaMetricSlug(String(v))} items={AREA_METRIC_OPTIONS.map((o) => ({ value: o.slug, label: o.label }))}>
+            <SelectTrigger size="sm" className="w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AREA_METRIC_OPTIONS.map((o) => (
+                <SelectItem key={o.slug} value={o.slug}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </CardHeader>
+        <CardContent>
+          <BigGradientArea data={areaChartData} unit={areaMetricIndicator?.unit} tone="brand" />
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-3 mb-4">
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Generation mix by source</CardTitle>
+              <p className="text-xs text-muted-foreground">Installed capacity, MW</p>
+            </div>
+            <NationalContextBadge />
+          </CardHeader>
+          <CardContent>
+            <DonutChart
+              data={mixData}
+              unit="MW"
+              centerLabel={{ value: fmtNum(mixTotal, 0), caption: "MW total" }}
+            />
+            <div className="space-y-1.5 mt-2">
+              {mixData.map((d) => (
+                <div key={d.label} className="flex items-center gap-2 text-xs">
+                  <span className="size-2 rounded-full shrink-0" style={{ background: d.color }} />
+                  <span className="text-muted-foreground truncate flex-1">{d.label}</span>
+                  <span className="font-medium tabular-nums">{fmtNum(d.value, 0)}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">All counties ranked</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              {singlePrimary ? singlePrimary.indicator.name : "Composite score"}, {yearTo}
+            </p>
+          </CardHeader>
+          <CardContent>
+            <GradientRankBar
+              data={rankedCounties.map((r) => ({
+                label: r.county.name,
+                value: singlePrimary ? Math.round((r.rawPrimary ?? 0) * 10) / 10 : Math.round(r.score ?? 0),
+              }))}
+              unit={singlePrimary?.indicator.unit}
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="mb-4">
+        <CardHeader className="flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Monthly generation vs. target</CardTitle>
+            <p className="text-xs text-muted-foreground">Current financial year, GWh</p>
+          </div>
+          <NationalContextBadge />
+        </CardHeader>
+        <CardContent>
+          <MonthlyBenchmarkChart data={monthlyData} unit="GWh" tone="brand" />
+        </CardContent>
+      </Card>
 
       {/* Main comparison chart */}
       <Card className="mb-4">
@@ -462,77 +675,47 @@ export function DashboardClient({
         </CardContent>
       </Card>
 
-      {/* Ranking + donut */}
+      {/* Maps */}
       <div className="grid gap-4 lg:grid-cols-3 mb-4">
         <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">All counties ranked</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              {singlePrimary ? singlePrimary.indicator.name : "Composite score"}, {yearTo}
-            </p>
+          <CardHeader className="flex-row items-start justify-between">
+            <div>
+              <CardTitle className="text-base">County performance map</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                {singlePrimary ? singlePrimary.indicator.name : "Composite score across sectors"}, {yearTo} · click a county to open its latest submission
+              </p>
+            </div>
+            {populationWeightedAvg != null && (
+              <div className="text-right shrink-0">
+                <p className="text-lg font-semibold tabular-nums">
+                  {fmtNum(populationWeightedAvg, singlePrimary?.indicator.unit === "%" ? 1 : 0)}
+                  {singlePrimary?.indicator.unit === "%" ? "%" : ""}
+                </p>
+                <p className="text-[11px] text-muted-foreground">pop.-weighted avg</p>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
-            <GradientRankBar
-              data={rankedCounties.map((r) => ({
-                label: r.county.name,
-                value: singlePrimary ? Math.round((r.rawPrimary ?? 0) * 10) / 10 : Math.round(r.score ?? 0),
-              }))}
-              unit={singlePrimary?.indicator.unit}
-            />
+            <ChoroplethMap data={choroplethData} unit={singlePrimary?.indicator.unit} />
+            <div className="mt-3 pt-3 border-t border-border">
+              <ChoroplethLegend />
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">
-              {sectorSlug === "all" ? "Split by sector" : "Technology / fuel-type split"}
-            </CardTitle>
-            <p className="text-xs text-muted-foreground">National total, {yearTo}</p>
+            <CardTitle className="text-base">Provider &amp; private-sector sites</CardTitle>
+            <p className="text-xs text-muted-foreground">Real GPS coordinates on file</p>
           </CardHeader>
           <CardContent>
-            <DonutChart data={donutData} />
-            <div className="space-y-1.5 mt-2">
-              {donutData.map((d) => (
-                <div key={d.label} className="flex items-center gap-2 text-xs">
-                  <span className="size-2 rounded-full shrink-0" style={{ background: d.color }} />
-                  <span className="text-muted-foreground truncate flex-1">{d.label}</span>
-                  <span className="font-medium tabular-nums">{fmtNum(d.value, 0)}</span>
-                </div>
-              ))}
+            <PointMap points={mapPoints} missingCount={missingLocationCount} />
+            <div className="mt-3 pt-3 border-t border-border">
+              <PointMapLegend />
             </div>
           </CardContent>
         </Card>
       </div>
-
-      {/* Heatmap */}
-      <Card className="mb-4">
-        <CardHeader>
-          <CardTitle className="text-base">County performance heatmap</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            {sectorSlug === "all" ? "Composite score across sectors" : currentSector?.name}, {yearTo} · shaded relative to this year&apos;s spread
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-6 sm:grid-cols-8 lg:grid-cols-10 gap-2">
-            {countyScores.map(({ county, score }) => {
-              const relative = score != null ? rescale(score, scoreRange) : null;
-              return (
-                <div
-                  key={county.id}
-                  title={`${county.name}: ${score != null ? Math.round(score) : "no data"}`}
-                  className="aspect-square rounded-lg grid place-items-center text-[10px] font-medium text-center px-1 leading-tight"
-                  style={{
-                    backgroundColor: relative != null ? heatColor(relative) : "var(--muted)",
-                    color: relative != null && relative > 40 ? "white" : "var(--foreground)",
-                  }}
-                >
-                  {county.name}
-                </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Data table */}
       <Card className="p-0 overflow-hidden">
@@ -584,6 +767,30 @@ export function DashboardClient({
           </table>
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="electricity">
+          <ElectricityTab epraRows={epraRows} indicators={indicators} counties={counties} valueRows={valueRows} />
+        </TabsContent>
+        <TabsContent value="renewable">
+          <RenewableTab epraRows={epraRows} indicators={indicators} />
+        </TabsContent>
+        <TabsContent value="efficiency">
+          <EfficiencyTab epraRows={epraRows} indicators={indicators} counties={counties} valueRows={valueRows} yearTo={yearTo} />
+        </TabsContent>
+        <TabsContent value="petroleum">
+          <PetroleumTab epraRows={epraRows} indicators={indicators} />
+        </TabsContent>
+        <TabsContent value="lpg">
+          <LpgTab epraRows={epraRows} indicators={indicators} />
+        </TabsContent>
+        <TabsContent value="energy-balance">
+          <EnergyBalanceTab epraRows={epraRows} indicators={indicators} mixData={mixData} mixTotal={mixTotal} />
+        </TabsContent>
+        <TabsContent value="consumer-protection">
+          <ConsumerProtectionTab epraRows={epraRows} indicators={indicators} />
+        </TabsContent>
+      </Tabs>
     </>
   );
 }
@@ -594,23 +801,6 @@ function chipClasses(tone: "success" | "danger" | "warning"): string {
     danger: "bg-danger-soft text-danger",
     warning: "bg-warning-soft text-warning",
   }[tone];
-}
-
-/** Maps a raw score into the observed [min,max] range onto a clean 0-100 scale. */
-function rescale(value: number, range: { min: number; max: number }): number {
-  if (range.max === range.min) return 50;
-  return ((value - range.min) / (range.max - range.min)) * 100;
-}
-
-/** Deep teal (strong) fading through amber to soft red (weak) — existing tokens only. */
-function heatColor(score: number): string {
-  const s = Math.max(0, Math.min(100, score));
-  if (s >= 50) {
-    const t = (s - 50) / 50; // 0 (amber) -> 1 (teal)
-    return `color-mix(in oklch, var(--brand) ${Math.round(t * 100)}%, var(--warning) ${Math.round((1 - t) * 100)}%)`;
-  }
-  const t = s / 50; // 0 (red) -> 1 (amber)
-  return `color-mix(in oklch, var(--warning) ${Math.round(t * 100)}%, var(--danger) ${Math.round((1 - t) * 100)}%)`;
 }
 
 function computeInsight(
