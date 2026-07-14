@@ -2,8 +2,11 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { MiniBars } from "@/components/charts";
+import { PendingApprovalsCard } from "@/components/pending-approvals-card";
 import { daysUntil, daysBetween } from "@/lib/format";
 import { runNationalInsight, type NationalOverviewChip } from "@/lib/agents";
+import { getPendingApprovalsFor } from "@/lib/pending-approvals";
+import type { Profile } from "@/lib/auth";
 import { one } from "@/lib/rel";
 import { cn } from "@/lib/utils";
 import { CountyStatusTable, type CountyRow } from "./county-status-table";
@@ -11,9 +14,10 @@ import {
   KanbanSquare, TriangleAlert, Download, ArrowRight, ArrowUpRight, Activity,
 } from "lucide-react";
 
-export async function NationalHome({ name }: { name: string }) {
+export async function NationalHome({ profile }: { profile: Profile }) {
   const supabase = await createClient();
-  const first = name.split(/\s+/)[0];
+  const first = profile.full_name.split(/\s+/)[0];
+  const pendingApprovals = await getPendingApprovalsFor(profile);
 
   const [{ data: cycle }, { data: counties }, { data: providerSubmitters }] = await Promise.all([
     supabase.from("planning_cycles").select("name, plan_due_date").eq("status", "active").maybeSingle(),
@@ -280,6 +284,11 @@ export async function NationalHome({ name }: { name: string }) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Pending approvals */}
+      <div className="mt-4">
+        <PendingApprovalsCard approvals={pendingApprovals} />
+      </div>
 
       {/* County status table */}
       <div className="mt-6">

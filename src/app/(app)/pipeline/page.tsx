@@ -3,7 +3,9 @@ import { requireProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page";
 import { PipelineBoard, type PipelineCardData, type StageInfo } from "./pipeline-board";
-import { STAGE_ROLE, canActOnStage } from "@/lib/pipeline-rbac";
+import { DelegateDialogTrigger } from "./delegate-dialog";
+import { STAGE_ROLE, resolveActingIdentities, canActOnStageAs } from "@/lib/pipeline-rbac";
+import { listActiveDelegationsReceivedBy, listDelegationsGivenBy, listEligibleDelegates } from "@/lib/delegations";
 import { one } from "@/lib/rel";
 import { initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -17,13 +19,20 @@ const TYPES = [
 export default async function PipelinePage({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string }>;
+  searchParams: Promise<{ type?: string; open?: string }>;
 }) {
   const profile = await requireProfile();
-  const { type: typeParam } = await searchParams;
+  const { type: typeParam, open } = await searchParams;
   const type = TYPES.some((t) => t.key === typeParam) ? typeParam! : "county";
 
   const supabase = await createClient();
+
+  const [receivedDelegations, myDelegations] = await Promise.all([
+    listActiveDelegationsReceivedBy(profile.id),
+    listDelegationsGivenBy(profile.id),
+  ]);
+  const identities = resolveActingIdentities({ role: profile.role, submitterId: profile.submitter_id }, receivedDelegations);
+  const eligibleDelegates = await listEligibleDelegates(profile.role, profile.submitter_id, profile.id);
 
   const [{ data: stages }, { data: subRows }, { data: reviewers }] = await Promise.all([
     supabase
@@ -116,6 +125,8 @@ export default async function PipelinePage({
       candidates.find((r) => r.submitter_id === null) ??
       null;
 
+    const actingAs = canActOnStageAs(identities, stageKey, s.submitter_id);
+
     return {
       id: s.id,
       title: s.title,
@@ -128,8 +139,9 @@ export default async function PipelinePage({
       enteredStageAt,
       waitingOnName: waitingOn?.full_name ?? null,
       waitingOnInitials: waitingOn ? initials(waitingOn.full_name) : "—",
-      canAdvance: order < maxOrder && canActOnStage({ role: profile.role, submitterId: profile.submitter_id }, stageKey, s.submitter_id),
-      canReturn: order > 0 && canActOnStage({ role: profile.role, submitterId: profile.submitter_id }, stageKey, s.submitter_id),
+      canAdvance: order < maxOrder && !!actingAs,
+      canReturn: order > 0 && !!actingAs,
+      actingOnBehalfOf: actingAs?.onBehalfOf?.name ?? null,
       history,
     };
   });
@@ -147,24 +159,32 @@ export default async function PipelinePage({
         description="Every plan as a card moving through its real approval stages. Nothing moves without a visible action attached to it."
       />
 
-      <div className="inline-flex rounded-xl bg-muted p-1 mb-6">
-        {TYPES.map((t) => (
-          <Link
-            key={t.key}
-            href={`/pipeline?type=${t.key}`}
-            className={cn(
-              "px-3.5 py-1.5 rounded-lg text-sm transition-all duration-150",
-              type === t.key
-                ? "bg-card text-foreground font-medium shadow-sm ring-1 ring-foreground/6"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {t.label}
-          </Link>
-        ))}
+      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
+        <div className="inline-flex rounded-xl bg-muted p-1">
+          {TYPES.map((t) => (
+            <Link
+              key={t.key}
+              href={`/pipeline?type=${t.key}`}
+              className={cn(
+                "px-3.5 py-1.5 rounded-lg text-sm transition-all duration-150",
+                type === t.key
+                  ? "bg-card text-foreground font-medium shadow-sm ring-1 ring-foreground/6"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {t.label}
+            </Link>
+          ))}
+        </div>
+
+        <DelegateDialogTrigger
+          eligibleDelegates={eligibleDelegates}
+          myDelegations={myDelegations}
+          scopeLabel={profile.submitter?.name ?? "National level"}
+        />
       </div>
 
-      <PipelineBoard stages={stageInfos} cards={cards} />
+      <PipelineBoard stages={stageInfos} cards={cards} initialOpenId={open ?? null} />
     </>
   );
 }

@@ -9,9 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetBody, SheetFooter } from "@/components/ui/sheet";
-import { daysSince, fmtDate } from "@/lib/format";
+import { daysSince, fmtDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { Search, AlertTriangle, Undo2, Check } from "lucide-react";
+import { Search, AlertTriangle, Undo2, Check, UserCog } from "lucide-react";
 
 export interface StageInfo {
   id: string;
@@ -33,6 +33,8 @@ export interface PipelineCardData {
   waitingOnInitials: string;
   canAdvance: boolean;
   canReturn: boolean;
+  /** Set when the viewer can act on this card only via a delegation — the name of the person they're standing in for. */
+  actingOnBehalfOf: string | null;
   history: { id: string; action: string; comment: string | null; actedAt: string; stageName: string; actorName: string }[];
 }
 
@@ -44,9 +46,17 @@ const TYPE_TAG: Record<string, { label: string; cls: string }> = {
 
 const LINGER_THRESHOLD_DAYS = 3;
 
-export function PipelineBoard({ stages, cards }: { stages: StageInfo[]; cards: PipelineCardData[] }) {
+export function PipelineBoard({
+  stages,
+  cards,
+  initialOpenId = null,
+}: {
+  stages: StageInfo[];
+  cards: PipelineCardData[];
+  initialOpenId?: string | null;
+}) {
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialOpenId);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -223,7 +233,7 @@ function PipelineDetailContent({ card, onDone }: { card: PipelineCardData; onDon
                       <span className="font-medium">{h.actorName}</span>{" "}
                       {h.action === "sent_back" ? "sent back from" : "approved"} {h.stageName}
                     </p>
-                    <p className="text-xs text-muted-foreground">{fmtDate(h.actedAt)}</p>
+                    <p className="text-xs text-muted-foreground">{fmtDateTime(h.actedAt)}</p>
                     {h.comment && (
                       <p className="text-xs text-foreground bg-muted rounded-lg px-2.5 py-1.5 mt-1.5">{h.comment}</p>
                     )}
@@ -237,12 +247,20 @@ function PipelineDetailContent({ card, onDone }: { card: PipelineCardData; onDon
         {(card.canAdvance || card.canReturn) && (
           <div className="border-t border-border pt-4 space-y-2">
             <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Take action</h4>
+            {card.actingOnBehalfOf && (
+              <p className="flex items-center gap-1.5 text-xs text-agent bg-agent-soft rounded-lg px-2.5 py-1.5">
+                <UserCog className="size-3.5 shrink-0" /> Acting on behalf of {card.actingOnBehalfOf}
+              </p>
+            )}
             <Textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="A short comment explaining your decision…"
               rows={3}
             />
+            {!comment.trim() && (
+              <p className="text-xs text-muted-foreground">A comment is required before you can approve or send this back.</p>
+            )}
           </div>
         )}
       </SheetBody>
@@ -250,12 +268,12 @@ function PipelineDetailContent({ card, onDone }: { card: PipelineCardData; onDon
       {(card.canAdvance || card.canReturn) && (
         <SheetFooter className="justify-end">
           {card.canReturn && (
-            <Button variant="outline" disabled={pending} onClick={() => submit("return")}>
+            <Button variant="outline" disabled={pending || !comment.trim()} onClick={() => submit("return")}>
               <Undo2 className="size-3.5" /> Send back a stage
             </Button>
           )}
           {card.canAdvance && (
-            <Button disabled={pending} onClick={() => submit("advance")}>
+            <Button disabled={pending || !comment.trim()} onClick={() => submit("advance")}>
               <Check className="size-3.5" /> Approve and move forward
             </Button>
           )}

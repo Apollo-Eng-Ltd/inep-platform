@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/auth";
-import { canActOnStage, STAGE_ROLE } from "@/lib/pipeline-rbac";
+import { resolveActingIdentities, canActOnStageAs, STAGE_ROLE } from "@/lib/pipeline-rbac";
+import { listActiveDelegationsReceivedBy } from "@/lib/delegations";
 import { one } from "@/lib/rel";
 
 /** Approve and move a plan forward one stage (or publish it, if the next stage is terminal). */
@@ -41,11 +42,17 @@ async function move(submissionId: string, dir: "advance" | "return", comment: st
   const currentKey = currentStage?.stage_key ?? "draft";
 
   // Real, enforced gate — checked here before any write, not just hidden in
-  // the UI. See src/lib/pipeline-rbac.ts for what this can and can't check
-  // given the current schema.
-  if (!canActOnStage({ role: profile.role, submitterId: profile.submitter_id }, currentKey, sub.submitter_id)) {
+  // the UI. Re-fetches the caller's active delegations fresh (never trusts a
+  // client-supplied "I'm acting as X" flag) so a borrowed identity is exactly
+  // as real as the caller's own. See src/lib/pipeline-rbac.ts for what this
+  // can and can't check given the current schema.
+  const received = await listActiveDelegationsReceivedBy(profile.id);
+  const identities = resolveActingIdentities({ role: profile.role, submitterId: profile.submitter_id }, received);
+  const actingAs = canActOnStageAs(identities, currentKey, sub.submitter_id);
+  if (!actingAs) {
     return { error: "You're not authorized to act on this stage for this submitter." };
   }
+  const finalComment = actingAs.onBehalfOf ? `${comment} (acting on behalf of ${actingAs.onBehalfOf.name})` : comment;
 
   const { data: stages } = await supabase
     .from("workflow_stages")
@@ -70,7 +77,7 @@ async function move(submissionId: string, dir: "advance" | "return", comment: st
     stage_id: target.id,
     action: dir === "advance" ? "approved" : "sent_back",
     actor_id: profile.id,
-    comment,
+    comment: finalComment,
   });
 
   await supabase.from("audit_log").insert({
@@ -78,7 +85,9 @@ async function move(submissionId: string, dir: "advance" | "return", comment: st
     action: dir === "advance" ? "advance_stage" : "return_stage",
     entity_type: "submission",
     entity_id: submissionId,
-    detail: { to_stage: target.name },
+    detail: actingAs.onBehalfOf
+      ? { to_stage: target.name, acted_on_behalf_of: actingAs.onBehalfOf.id }
+      : { to_stage: target.name },
   });
 
   await notifyStageActors(sub.submitter_id, target.stage_key, sub.title, submissionId);

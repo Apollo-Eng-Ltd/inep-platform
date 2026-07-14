@@ -8,6 +8,8 @@ import { StatusBadge } from "@/components/badges";
 import { fmtDate, daysUntil, daysBetween } from "@/lib/format";
 import { one } from "@/lib/rel";
 import { runCountyInsight, type IndicatorTrend } from "@/lib/agents";
+import { getPendingApprovalsFor } from "@/lib/pending-approvals";
+import { PendingApprovalsCard } from "@/components/pending-approvals-card";
 import {
   FilePlus2,
   ArrowRight,
@@ -23,7 +25,7 @@ import { NationalHome } from "./national-home";
 export default async function HomePage() {
   const profile = await requireProfile();
   return isNational(profile.role) ? (
-    <NationalHome name={profile.full_name} />
+    <NationalHome profile={profile} />
   ) : (
     <CountyHome profile={profile} />
   );
@@ -51,6 +53,7 @@ async function CountyHome({
 }) {
   const supabase = await createClient();
   const submitterId = profile.submitter?.id;
+  const pendingApprovals = await getPendingApprovalsFor(profile);
   const KEY = ["electricity_access_pct", "grid_connections", "clean_cooking_pct"];
 
   // last two annual reports for this county, for trend + insight
@@ -376,6 +379,10 @@ async function CountyHome({
           </div>
         </CardContent>
       </Card>
+
+      <div className="mt-4">
+        <PendingApprovalsCard approvals={pendingApprovals} />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-3 mt-4">
         <Card className="lg:col-span-2">

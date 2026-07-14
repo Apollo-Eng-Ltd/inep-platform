@@ -24,6 +24,13 @@ export function fmtDate(iso: string | null | undefined): string {
   });
 }
 
+/** Date + exact time — for audit-trail entries where "which day" isn't enough. */
+export function fmtDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric" })}, ${d.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
 export function daysUntil(iso: string | null | undefined): number | null {
   if (!iso) return null;
   return Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);

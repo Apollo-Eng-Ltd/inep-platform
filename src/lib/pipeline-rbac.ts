@@ -13,9 +13,9 @@
 // This check runs in the server action before any mutation — not just hidden
 // in the UI. It is not a Postgres RLS policy (that needs a migration this
 // environment can't apply either), so it's a real gate, just not a
-// database-enforced one. See the delegation note in pipeline/actions.ts for
-// the one piece that couldn't be built at all without new schema.
+// database-enforced one.
 import type { Role } from "./auth";
+import type { Delegation } from "./delegations";
 
 export const STAGE_ROLE: Partial<Record<string, Role>> = {
   draft: "county_officer",
@@ -50,6 +50,28 @@ export function canActOnStage(profile: StageActor, stageKey: string, planSubmitt
   }
   if (profile.role !== required) return false;
   return profile.submitterId == null || profile.submitterId === planSubmitterId;
+}
+
+export interface ActingIdentity extends StageActor {
+  /** Set when this identity comes from a delegation, not the viewer's own account. */
+  onBehalfOf?: { id: string; name: string };
+}
+
+/** The viewer's own identity plus one borrowed identity per active delegation they've received. */
+export function resolveActingIdentities(profile: StageActor, received: Delegation[]): ActingIdentity[] {
+  return [
+    profile,
+    ...received.map((d) => ({
+      role: d.role,
+      submitterId: d.submitterId,
+      onBehalfOf: { id: d.delegatorId, name: d.delegatorName },
+    })),
+  ];
+}
+
+/** First identity (own, or a borrowed one) that's actually authorized to act on this stage. */
+export function canActOnStageAs(identities: ActingIdentity[], stageKey: string, planSubmitterId: string): ActingIdentity | null {
+  return identities.find((id) => canActOnStage(id, stageKey, planSubmitterId)) ?? null;
 }
 
 /**

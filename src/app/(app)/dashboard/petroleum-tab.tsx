@@ -41,9 +41,9 @@ export function PetroleumTab({ epraRows, indicators }: { epraRows: EpraRow[]; in
     const ind = indicatorBySlug.get(slug);
     if (!ind) return null;
     const rows = epraSeriesFor(epraRows, indicatorBySlug, slug);
-    const latest = rows[rows.length - 1]?.value ?? null;
+    const latest: number | null = rows[rows.length - 1]?.value ?? null;
     return { name: ind.name, latest, tone: PUMP_TONES[i % PUMP_TONES.length] };
-  }).filter((x): x is { name: string; latest: number | null; tone: (typeof PUMP_TONES)[number] } => x != null);
+  }).filter((x) => x != null);
 
   const omcData: DonutSlice[] = useMemo(
     () =>
