@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import { advanceStage, returnStage } from "./actions";
 import { Input } from "@/components/ui/input";
@@ -11,7 +12,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetBody, SheetFooter } from "@/components/ui/sheet";
 import { daysSince, fmtDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { Search, AlertTriangle, Undo2, Check, UserCog } from "lucide-react";
+import { Search, AlertTriangle, Undo2, Check, UserCog, FileSearch, ArrowUpRight } from "lucide-react";
 
 export interface StageInfo {
   id: string;
@@ -211,6 +212,20 @@ function PipelineDetailContent({ card, onDone }: { card: PipelineCardData; onDon
       </SheetHeader>
 
       <SheetBody className="space-y-5">
+        <Link
+          href={`/submissions/${card.id}`}
+          className="flex items-center gap-3 rounded-xl border border-brand/20 bg-brand-soft px-3.5 py-3 hover:border-brand/40 transition-colors"
+        >
+          <div className="size-8 rounded-lg bg-brand/15 text-brand grid place-items-center shrink-0">
+            <FileSearch className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-brand">Review full plan data</p>
+            <p className="text-xs text-muted-foreground">See every submitted indicator, value, and flag before you decide</p>
+          </div>
+          <ArrowUpRight className="size-4 text-brand shrink-0" />
+        </Link>
+
         <div>
           <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">History</h4>
           {card.history.length === 0 ? (
