@@ -63,7 +63,7 @@ export function TrendLine({ data, unit }: { data: Point[]; unit?: string }) {
 }
 
 /** Tiny inline bar trend for stat cards — no axes, no tooltip, just a shape. */
-export type Tone = "brand" | "warning" | "danger" | "success" | "muted" | "agent" | "provider";
+export type Tone = "brand" | "warning" | "danger" | "success" | "muted" | "agent" | "provider" | "private";
 const TONE_VAR: Record<Tone, string> = {
   brand: "var(--brand)",
   warning: "var(--warning)",
@@ -72,6 +72,7 @@ const TONE_VAR: Record<Tone, string> = {
   muted: "var(--muted-foreground)",
   agent: "var(--agent)",
   provider: "var(--provider)",
+  private: "var(--private)",
 };
 
 export function MiniBars({

@@ -27,6 +27,7 @@ export function navForRole(role: Role): NavGroup[] {
           { label: "History", href: "/history", icon: "History" },
           { label: "Documents", href: "/documents", icon: "FolderClosed" },
           { label: "Public participation", href: "/participation", icon: "MessagesSquare" },
+          { label: "Pipeline (Agents)", href: "/agent-pipeline", icon: "Waypoints" },
         ],
       },
       { heading: "Account", items: [notifications, help] },
@@ -39,6 +40,7 @@ export function navForRole(role: Role): NavGroup[] {
     items: [
       { label: "Dashboard", href: "/dashboard", icon: "LayoutDashboard" },
       { label: "Pipeline board", href: "/pipeline", icon: "KanbanSquare" },
+      { label: "Pipeline (Agents)", href: "/agent-pipeline", icon: "Waypoints" },
       { label: "Provider plans", href: "/providers", icon: "Building2" },
       { label: "Private sector / PBO", href: "/private-sector", icon: "Factory" },
       { label: "Ask a question", href: "/query", icon: "Sparkles" },

@@ -359,28 +359,66 @@ async function main() {
   });
   await insert("submission_stage_history", historyRows);
 
-  // ---- a few deliberate anomalies + cross-cutting scores --------------------
+  // ---- validation/anomaly/compliance flags + cross-cutting scores -----------
+  // Enough real historical volume, spread over the last three weeks, that the
+  // agent pipeline view has genuine counts/throughput/ticker entries to show —
+  // not just the handful of rows earlier screens needed.
   console.log("→ Seeding validation flags and cross-cutting scores…");
   const flagRows: Record<string, unknown>[] = [];
   const ccRows: Record<string, unknown>[] = [];
   const livePlans = subSeeds.filter((s) => s.submission_type === "full_plan" && s.type === "county");
-  livePlans.slice(0, 6).forEach((s, i) => {
+
+  const VALIDATION_RULES: { rule_code: string; severity: string; message: (name: string) => string; indicatorSlug?: string }[] = [
+    { rule_code: "MISSING_VALUE", severity: "error", indicatorSlug: "installed_capacity_mw", message: () => "Installed capacity is blank but grid connections were reported — value expected." },
+    { rule_code: "UNIT_MISMATCH", severity: "warning", indicatorSlug: "avg_tariff_kwh", message: () => "Average tariff reported in an unexpected unit — check against the KES/kWh standard." },
+    { rule_code: "DUPLICATE", severity: "warning", indicatorSlug: "clean_cooking_pct", message: () => "Clean cooking access was reported twice for this period — expected once." },
+    { rule_code: "ABOVE_RANGE", severity: "error", indicatorSlug: "electricity_access_pct", message: (name) => `${name}'s electricity access rate exceeds the plausible maximum for this county.` },
+  ];
+  const ANOMALY_RULES: { rule_code: string; severity: string; message: (name: string) => string; indicatorSlug?: string }[] = [
+    { rule_code: "YOY_JUMP", severity: "warning", indicatorSlug: "electricity_access_pct", message: (name) => `${name}'s electricity access rose more than 25% year-on-year — unusually fast versus its own history.` },
+    { rule_code: "YOY_JUMP", severity: "error", indicatorSlug: "installed_capacity_mw", message: (name) => `${name}'s installed capacity jumped over 40% year-on-year against target — worth a second look.` },
+    { rule_code: "PEER_OUTLIER", severity: "warning", indicatorSlug: "firewood_dependency_pct", message: (name) => `${name}'s firewood dependency is well outside the range reported by comparable counties.` },
+    { rule_code: "PEER_OUTLIER", severity: "warning", indicatorSlug: "rd_budget_kes_m", message: (name) => `${name}'s energy budget conflicts with the planning assumptions used by its neighboring counties.` },
+  ];
+
+  livePlans.forEach((s, i) => {
     const subId = subIdByTitle.get(s.title)!;
-    if (i % 2 === 0) {
+    const county = COUNTIES.find((c) => c.code === s.key.replace(/P$/, ""));
+    const countyName = county?.name ?? s.key;
+    const r = rng(`flags:${s.key}`);
+
+    // Validation: most plans get one real check logged; a third get a second.
+    const vRule = VALIDATION_RULES[i % VALIDATION_RULES.length];
+    flagRows.push({
+      submission_id: subId, agent: "validation", indicator_id: vRule.indicatorSlug ? indicatorId.get(vRule.indicatorSlug) : null,
+      severity: vRule.severity, rule_code: vRule.rule_code, message: vRule.message(countyName),
+      details: JSON.stringify({}), status: r() < 0.75 ? "open" : r() < 0.5 ? "resolved" : "dismissed",
+      created_at: daysAgo(1 + (i % 20)),
+    });
+
+    // Anomaly: roughly 60% of counties trip a real statistical check.
+    if (r() < 0.6) {
+      const aRule = ANOMALY_RULES[i % ANOMALY_RULES.length];
       flagRows.push({
-        submission_id: subId, agent: "anomaly", indicator_id: indicatorId.get("electricity_access_pct"),
-        severity: "warning", rule_code: "YOY_JUMP",
-        message: "Electricity access rose more than 25% year-on-year — unusually fast versus this county's history.",
+        submission_id: subId, agent: "anomaly", indicator_id: aRule.indicatorSlug ? indicatorId.get(aRule.indicatorSlug) : null,
+        severity: aRule.severity, rule_code: aRule.rule_code, message: aRule.message(countyName),
         details: JSON.stringify({ previous: 61.2, current: 78.9, threshold_pct: 25 }),
-      });
-    } else {
-      flagRows.push({
-        submission_id: subId, agent: "validation", indicator_id: indicatorId.get("installed_capacity_mw"),
-        severity: "error", rule_code: "MISSING_VALUE",
-        message: "Installed capacity is blank but grid connections were reported — value expected.",
-        details: JSON.stringify({}),
+        status: r() < 0.8 ? "open" : "resolved",
+        created_at: daysAgo(1 + (i % 18)),
       });
     }
+
+    // Compliance: a real minority sit past their review-cycle threshold.
+    if (i % 9 === 3) {
+      flagRows.push({
+        submission_id: subId, agent: "compliance", indicator_id: null,
+        severity: "warning", rule_code: "OVERDUE",
+        message: `${countyName}'s report is ${2 + (i % 5)} days overdue against its review cycle.`,
+        details: JSON.stringify({ days_overdue: 2 + (i % 5) }),
+        status: "open", created_at: daysAgo(i % 6),
+      });
+    }
+
     for (const dim of ["gender", "disaster_risk", "environment"] as const) {
       ccRows.push({
         submission_id: subId, dimension: dim,
@@ -655,13 +693,94 @@ async function main() {
   }
   await insert("public_comments", commentRows);
 
-  // ---- agent action log + notifications ------------------------------------
-  const agentRows: Record<string, unknown>[] = livePlans.slice(0, 4).map((s) => ({
-    agent: "insight", submission_id: subIdByTitle.get(s.title)!, action_type: "summary_drafted",
-    input_summary: `Aggregated indicators for ${s.key}`,
-    proposed_output: JSON.stringify({ text: "Draft insight generated from approved indicators." }),
-    status: "proposed",
-  }));
+  // ---- agent action log ------------------------------------------------------
+  // Real historical volume across all ten agents, spread over the last three
+  // weeks, so the agent pipeline view has genuine counts/throughput/pending
+  // decisions to show instead of the four placeholder rows this used to be.
+  console.log("→ Seeding agent action log…");
+  type AgentActionSeed = {
+    agent: string; submissionId: string; actionType: string; inputSummary: string;
+    summary: string; ageDays: number; decided: "auto" | "approved" | "rejected" | "proposed";
+  };
+  const agentActionSeeds: AgentActionSeed[] = [];
+
+  const pushAgentAction = (
+    agent: string, submissionId: string, actionType: string, inputSummary: string,
+    summary: string, ageDays: number, decided: AgentActionSeed["decided"]
+  ) => agentActionSeeds.push({ agent, submissionId, actionType, inputSummary, summary, ageDays, decided });
+
+  livePlans.forEach((s, i) => {
+    const subId = subIdByTitle.get(s.title)!;
+    const county = COUNTIES.find((c) => c.code === s.key.replace(/P$/, ""));
+    const countyName = county?.name ?? s.key;
+    const r = rng(`agent:${s.key}`);
+
+    pushAgentAction("intake", subId, "submission_received", `${countyName} plan received via web form`,
+      `Accepted ${INDICATORS.length} fields from ${countyName} via the web form.`, 2 + (i % 20), "auto");
+    pushAgentAction("validation", subId, "fields_checked", `${countyName} plan checked for completeness`,
+      `Checked ${INDICATORS.length} indicators against expected ranges, units, and duplicates.`, 2 + (i % 20), "auto");
+    pushAgentAction("anomaly", subId, "values_compared", `${countyName} plan compared to history and peers`,
+      `Compared reported values against ${countyName}'s own history and comparable counties.`, 1 + (i % 19),
+      r() < 0.25 ? "proposed" : r() < 0.7 ? "approved" : "auto");
+    pushAgentAction("drafting", subId, "narrative_drafted", `${countyName} plan narrative drafted`,
+      `Drafted a first-pass plan narrative for ${countyName} from the reported indicators.`, 3 + (i % 15),
+      r() < 0.2 ? "proposed" : r() < 0.5 ? "approved" : "auto");
+    pushAgentAction("cross_cutting", subId, "coverage_scored", `${countyName} plan scored for cross-cutting coverage`,
+      `Scored gender, disaster-risk, and environment coverage from the plan narrative.`, 3 + (i % 15),
+      r() < 0.15 ? "proposed" : "auto");
+    pushAgentAction("compliance", subId, "deadline_checked", `${countyName} review cycle checked`,
+      `Checked ${countyName}'s submission against its configured review cycle and due date.`, i % 8, "auto");
+    if (i % 6 === 0) {
+      pushAgentAction("aggregation", subId, "totals_rolled_up", `${countyName} approved data rolled into national totals`,
+        `Rolled ${countyName}'s approved indicators into the national electricity total.`, i % 10, "auto");
+    }
+    if (i % 8 === 0) {
+      pushAgentAction("insight", subId, "summary_drafted", `National dashboard insight refreshed`,
+        `Wrote the plain-English insight banner from approved data as of this cycle.`, i % 5,
+        r() < 0.3 ? "proposed" : "approved");
+    }
+  });
+
+  // Provider/private submissions get a lighter, type-appropriate agent trail.
+  [...PROVIDERS.map((p) => ({ key: p.code, name: p.name })), ...PRIVATE_ORGS.map((o) => ({ key: o.code, name: o.name }))].forEach((org, i) => {
+    const seed = subSeeds.find((s) => s.key === org.key);
+    if (!seed) return;
+    const subId = subIdByTitle.get(seed.title);
+    if (!subId) return;
+    const r = rng(`agent:org:${org.key}`);
+    pushAgentAction("intake", subId, "submission_received", `${org.name} report received`,
+      `Accepted ${org.name}'s annual report submission.`, 3 + (i % 18), "auto");
+    pushAgentAction("validation", subId, "fields_checked", `${org.name} report checked`,
+      `Checked ${org.name}'s reported fields against expected ranges and units.`, 3 + (i % 18),
+      r() < 0.3 ? "proposed" : "auto");
+    pushAgentAction("public_engagement", subId, "reply_drafted", `Citizen comment on ${org.name}`,
+      `Drafted a reply to a citizen comment referencing ${org.name}'s project.`, i % 12,
+      r() < 0.4 ? "proposed" : "approved");
+  });
+
+  // A handful of platform-wide query/insight runs, anchored to a real submission.
+  const anchorSubId = subIdByTitle.get(livePlans[0]?.title ?? "");
+  if (anchorSubId) {
+    for (let i = 0; i < 6; i++) {
+      pushAgentAction("query", anchorSubId, "question_answered", "National planner asked a dataset question",
+        "Answered a natural-language question about national electricity access with a chart.", i * 2, "auto");
+    }
+  }
+
+  const agentRows: Record<string, unknown>[] = agentActionSeeds.map((a) => {
+    // Only a real human decision (approved/rejected) gets a decided_by/decided_at —
+    // "auto" means the rule engine acted on its own, and "proposed" is still pending.
+    const humanDecided = a.decided === "approved" || a.decided === "rejected";
+    return {
+      agent: a.agent, submission_id: a.submissionId, action_type: a.actionType,
+      input_summary: a.inputSummary,
+      proposed_output: { summary: a.summary },
+      status: a.decided,
+      decided_by: humanDecided ? adminId : null,
+      decided_at: humanDecided ? daysAgo(Math.max(0, a.ageDays - 1)) : null,
+      created_at: daysAgo(a.ageDays),
+    };
+  });
   await insert("agent_actions", agentRows);
 
   await insert("notifications", [

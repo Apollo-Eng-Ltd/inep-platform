@@ -63,6 +63,7 @@ export function AppHeader({ profile, unread }: { profile: Profile; unread: numbe
               <DropdownMenuSeparator />
               <form action={signOut}>
                 <DropdownMenuItem
+                  nativeButton
                   className="text-danger data-highlighted:text-danger"
                   render={
                     <button type="submit" className="w-full">

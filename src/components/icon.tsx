@@ -3,14 +3,16 @@ import {
   Home, FilePlus2, FileText, FolderClosed, MessagesSquare, Bell, CircleHelp,
   LayoutDashboard, KanbanSquare, Building2, Factory, Sparkles, Inbox,
   CalendarClock, TriangleAlert, Scale, MessageSquareWarning, Users,
-  LayoutTemplate, ScrollText, History, type LucideIcon,
+  LayoutTemplate, ScrollText, History, ListChecks, Layers, PenLine, Activity,
+  Waypoints, type LucideIcon,
 } from "lucide-react";
 
 const ICONS: Record<string, LucideIcon> = {
   Home, FilePlus2, FileText, FolderClosed, MessagesSquare, Bell, CircleHelp,
   LayoutDashboard, KanbanSquare, Building2, Factory, Sparkles, Inbox,
   CalendarClock, TriangleAlert, Scale, MessageSquareWarning, Users,
-  LayoutTemplate, ScrollText, History,
+  LayoutTemplate, ScrollText, History, ListChecks, Layers, PenLine, Activity,
+  Waypoints,
 };
 
 export function Icon({ name, className }: { name: string; className?: string }) {

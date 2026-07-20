@@ -15,6 +15,7 @@ export const TONE_ICON_BG: Record<Tone, string> = {
   success: "bg-success-soft text-success",
   danger: "bg-danger-soft text-danger",
   muted: "bg-muted text-muted-foreground",
+  private: "bg-private-soft text-private",
 };
 
 /** One "Year at a Glance" style stat card — icon, big number, delta, gradient-bar trend. */

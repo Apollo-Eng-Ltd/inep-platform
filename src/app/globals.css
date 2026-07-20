@@ -240,3 +240,28 @@
     background-color: color-mix(in oklch, var(--foreground) 34%, transparent);
   }
 }
+
+/* Agent pipeline view — slow glow breathing on every node, a fade-in for new
+   ticker rows. Kept minimal and reused rather than adding per-node inline
+   keyframes. */
+@keyframes agent-glow-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+@keyframes ticker-row-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* Dash pattern marches from source to target along each connector, reading
+   as small pulses flowing in the direction data actually moves. */
+@keyframes edge-flow {
+  to { stroke-dashoffset: -28; }
+}
+/* Continuous downward feed for the live activity ticker — the list is
+   rendered twice back-to-back and scrolled exactly one copy's height so the
+   loop is seamless. Starts shifted up by one copy and animates back to 0,
+   so content visibly flows top-to-bottom instead of bottom-to-top. */
+@keyframes ticker-scroll {
+  from { transform: translateY(-50%); }
+  to { transform: translateY(0); }
+}
