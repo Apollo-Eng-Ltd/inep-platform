@@ -1,6 +1,7 @@
 import { requireProfile } from "@/lib/auth";
 import { getAgentGraphFor } from "@/lib/agent-pipeline";
 import { PageHeader } from "@/components/page";
+import { GoalBadge } from "@/components/goal-badge";
 import { AgentPipelineCanvas } from "./agent-pipeline-canvas";
 
 const SCOPE_LABEL: Record<string, string> = {
@@ -21,8 +22,11 @@ export default async function AgentPipelinePage() {
         title="Pipeline (Agents)"
         description={`Watching ${SCOPE_LABEL[profile.role] ?? "your"} agent activity live — every count and line here is a real, logged action.${
           totalPending > 0 ? ` ${totalPending} need${totalPending === 1 ? "s" : ""} your decision.` : ""
-        }`}
-      />
+        } Rule-based, auditable agents — no external AI dependency.`}
+      >
+        <GoalBadge goal={3} />
+        <GoalBadge goal={4} />
+      </PageHeader>
       <AgentPipelineCanvas graph={graph} />
     </>
   );

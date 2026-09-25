@@ -1,32 +1,35 @@
-// Flowchart-style geometry for the agent web — real data-flow order, left to
-// right, not a radial force layout. Each agent is assigned a fixed column
-// (its longest-path depth from the agents with no inputs, computed from the
-// same real edges rendered on the canvas), and nodes stack vertically inside
-// their column with fixed gaps. This prevents overlap by construction —
-// no relaxation needed, no risk of two cards ever landing on top of each
-// other — and reads as a pipeline moving in one direction, matching how the
-// agents actually feed each other.
+// Flowchart-style geometry for the agent web — compact icon nodes in real
+// data-flow order, left to right, generously spaced, not dense info-cards
+// packed into a web. Each agent is assigned a fixed column (its longest-path
+// depth from the agents with no inputs, computed from the same real edges
+// rendered on the canvas), and nodes stack vertically inside their column
+// with fixed gaps. This prevents overlap by construction — no relaxation
+// needed — and reads as a pipeline moving in one direction, matching how
+// the agents actually feed each other.
 import { AGENT_EDGES, type AgentName, type AgentNode } from "@/lib/agent-pipeline-shared";
 
-export const VIEW_W = 1520;
-export const VIEW_H = 760;
-const MARGIN_X = 110;
-const MARGIN_Y = 70;
-const ROW_GAP = 26;
+export const VIEW_W = 1680;
+export const VIEW_H = 980;
+export const MARGIN_X = 90;
+export const MARGIN_Y = 70;
+const ROW_GAP = 56;
 
-// Must track the actual rendered card sizes in agent-pipeline-canvas.tsx
-// (w-48 / w-40) — generous height estimates are safe (just adds a little
-// extra vertical gap), too-small estimates are what causes real overlap.
-export const CENTRAL_SIZE = 192; // card width, Tailwind w-48
-export const SECONDARY_SIZE = 160; // card width, Tailwind w-40
-const CENTRAL_HEIGHT = 165;
-const SECONDARY_HEIGHT = 105;
+// Icon tile size — the small square node itself, not the label underneath.
+export const CENTRAL_ICON = 68;
+export const SECONDARY_ICON = 52;
+// Footprint used for column-width/row-stacking math: the label block below
+// the icon is usually wider than the icon, so spacing must account for it.
+export const CENTRAL_SIZE = 148;
+export const SECONDARY_SIZE = 124;
+const CENTRAL_HEIGHT = CENTRAL_ICON + 62; // icon + gap + two-line label
+const SECONDARY_HEIGHT = SECONDARY_ICON + 54;
 
 export interface PositionedNode extends AgentNode {
   x: number;
-  y: number;
-  size: number; // width, used for label/approval-card offset math
+  y: number; // icon center — connectors attach here, the label renders below
+  size: number;
   height: number;
+  iconSize: number;
 }
 
 // Longest-path rank from AGENT_EDGES — column 0 is whatever has no real
@@ -38,8 +41,6 @@ function computeRanks(): Record<AgentName, number> {
     allIds.add(e.from);
     allIds.add(e.to);
   });
-  // Nodes with no incoming edge start at 0; relax edges repeatedly (safe —
-  // this tiny fixed graph has under a dozen edges and no cycles) until stable.
   allIds.forEach((id) => (rank[id] = 0));
   for (let pass = 0; pass < allIds.size; pass++) {
     let changed = false;
@@ -83,6 +84,7 @@ export function layoutNodes(nodes: AgentNode[]): PositionedNode[] {
         y: Math.max(MARGIN_Y, Math.min(VIEW_H - MARGIN_Y, y)),
         size: n.central ? CENTRAL_SIZE : SECONDARY_SIZE,
         height: heights[i],
+        iconSize: n.central ? CENTRAL_ICON : SECONDARY_ICON,
       });
       y += heights[i] / 2 + ROW_GAP + (heights[i + 1] ?? heights[i]) / 2;
     });
@@ -96,7 +98,16 @@ interface Point {
   y: number;
 }
 
-/** A gentle S-curve between two node centers — horizontal bow, so left-to-right connectors read as a flowchart, not a straight ruler line. */
+/** Right edge of a node's icon — where an outgoing connector should start. */
+export function outPoint(n: { x: number; y: number; iconSize: number }): Point {
+  return { x: n.x + n.iconSize / 2, y: n.y };
+}
+/** Left edge of a node's icon — where an incoming connector should end. */
+export function inPoint(n: { x: number; y: number; iconSize: number }): Point {
+  return { x: n.x - n.iconSize / 2, y: n.y };
+}
+
+/** A gentle S-curve between two points — horizontal tangent at both ends, so left-to-right connectors read as a clean flowchart bend, not a straight ruler line. */
 function controlPoints(a: Point, b: Point): [Point, Point] {
   const dx = (b.x - a.x) * 0.5;
   return [

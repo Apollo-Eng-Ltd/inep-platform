@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { one } from "@/lib/rel";
 import { halfYearLabel } from "@/lib/format";
 import { PageHeader } from "@/components/page";
+import { GoalBadge } from "@/components/goal-badge";
 import { UploadZone, type SubmissionOption } from "./upload-zone";
 import { DocumentsTable, type DocumentRow } from "./documents-table";
 
@@ -57,8 +58,10 @@ export default async function DocumentsPage() {
     <>
       <PageHeader
         title="Documents"
-        description="Supporting studies, maps, and annexes for your county's submissions."
-      />
+        description="Supporting studies, maps, and annexes for your county's submissions — central, permanent, versioned storage replacing the old static-PDF status quo."
+      >
+        <GoalBadge goal={6} />
+      </PageHeader>
 
       <UploadZone submissions={submissionOptions} />
 

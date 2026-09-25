@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetBody, SheetFooter } from "@/components/ui/sheet";
 import { daysSince, fmtDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { AiPulseDot } from "@/components/ai-tag";
 import { Search, AlertTriangle, Undo2, Check, UserCog, FileSearch, ArrowUpRight } from "lucide-react";
 
 export interface StageInfo {
@@ -142,8 +143,16 @@ function PipelineCard({ card, onOpen }: { card: PipelineCardData; onOpen: () => 
     <button
       type="button"
       onClick={onOpen}
-      className="w-full text-left rounded-xl border border-border bg-card p-3 shadow-sm hover:shadow-md hover:border-brand/30 transition-all space-y-2"
+      className="relative w-full text-left rounded-xl border border-border bg-card p-3 shadow-sm hover:shadow-md hover:border-brand/30 transition-all space-y-2"
     >
+      {card.flags > 0 && (
+        <span
+          title="An agent-generated flag is attached to this submission — open the card to review it"
+          className="absolute -top-1.5 -right-1.5 inline-flex items-center gap-1 rounded-full bg-agent text-white px-1.5 py-0.5 text-[9px] font-semibold shadow-sm"
+        >
+          <AiPulseDot className="[&>span]:bg-white" /> AI
+        </span>
+      )}
       <div className="flex items-center justify-between gap-2">
         <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium", tag.cls)}>
           {tag.label}

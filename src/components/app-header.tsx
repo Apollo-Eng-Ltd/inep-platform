@@ -14,9 +14,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { RoleBadge } from "@/components/badges";
+import { AiPulseDot } from "@/components/ai-tag";
 import { initials } from "@/lib/format";
+import type { AgentActivitySummary } from "@/lib/agent-pipeline";
 
-export function AppHeader({ profile, unread }: { profile: Profile; unread: number }) {
+export function AppHeader({
+  profile,
+  unread,
+  aiActivity,
+}: {
+  profile: Profile;
+  unread: number;
+  aiActivity: AgentActivitySummary;
+}) {
   const scope = profile.submitter?.name ?? "National level";
 
   return (
@@ -28,6 +38,18 @@ export function AppHeader({ profile, unread }: { profile: Profile; unread: numbe
         </div>
 
         <div className="flex items-center gap-2">
+          <Link
+            href="/agent-pipeline"
+            title="Real, logged agent checks and actions — click to see them live"
+            className="inline-flex items-center gap-2 rounded-full bg-agent-soft/60 hover:bg-agent-soft px-3 py-1.5 text-xs font-medium text-agent transition-colors"
+          >
+            <AiPulseDot />
+            <span className="tabular-nums font-semibold">{aiActivity.count}</span>
+            <span className="hidden sm:inline text-agent/80">
+              AI check{aiActivity.count === 1 ? "" : "s"} · {aiActivity.windowLabel}
+            </span>
+          </Link>
+
           <Button
             variant="ghost"
             size="icon"

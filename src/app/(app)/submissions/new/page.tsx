@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { startOrContinueSubmission } from "./actions";
 import { TemplatePreviewDialog } from "./template-preview-dialog";
 import { UploadZone } from "./upload-zone";
+import { GoalBadgeRow } from "@/components/goal-badge";
 import { ClipboardEdit, FileSpreadsheet, Download } from "lucide-react";
 
 const SECTOR_TONE = {
@@ -86,6 +87,7 @@ export default async function NewSubmissionPage() {
         <p className="text-sm text-muted-foreground">
           Choose how you&apos;d like to submit your data for this period.
         </p>
+        <GoalBadgeRow goals={[1, 2]} className="pt-1" />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 mt-6 items-stretch">
@@ -118,6 +120,9 @@ export default async function NewSubmissionPage() {
               <h2 className="font-medium">Use Excel instead</h2>
               <p className="text-sm text-muted-foreground">
                 Download our template, fill it in, and upload it back.
+              </p>
+              <p className="text-xs text-agent font-medium">
+                Standardized template — matches the live database schema field-for-field.
               </p>
             </div>
 

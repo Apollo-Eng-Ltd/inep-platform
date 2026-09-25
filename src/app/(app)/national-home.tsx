@@ -6,6 +6,7 @@ import { PendingApprovalsCard } from "@/components/pending-approvals-card";
 import { daysUntil, daysBetween } from "@/lib/format";
 import { runNationalInsight, type NationalOverviewChip } from "@/lib/agents";
 import { getPendingApprovalsFor } from "@/lib/pending-approvals";
+import { AiPulseDot } from "@/components/ai-tag";
 import type { Profile } from "@/lib/auth";
 import { one } from "@/lib/rel";
 import { cn } from "@/lib/utils";
@@ -264,23 +265,29 @@ export async function NationalHome({ profile }: { profile: Profile }) {
             <div className="size-8 rounded-lg bg-brand/10 text-brand grid place-items-center shrink-0">
               <Activity className="size-4" />
             </div>
-            <p className="text-sm leading-relaxed pt-1.5">
-              {insight.parts.map((p, i) =>
-                typeof p === "string" ? (
-                  <span key={i}>{p}</span>
-                ) : (
-                  <span
-                    key={i}
-                    className={cn(
-                      "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium mx-0.5",
-                      chipClasses((p as NationalOverviewChip).tone)
-                    )}
-                  >
-                    {(p as NationalOverviewChip).label}
-                  </span>
-                )
-              )}
-            </p>
+            <div>
+              <p className="text-sm leading-relaxed pt-1.5">
+                {insight.parts.map((p, i) =>
+                  typeof p === "string" ? (
+                    <span key={i}>{p}</span>
+                  ) : (
+                    <span
+                      key={i}
+                      className={cn(
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium mx-0.5",
+                        chipClasses((p as NationalOverviewChip).tone)
+                      )}
+                    >
+                      {(p as NationalOverviewChip).label}
+                    </span>
+                  )
+                )}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1.5 inline-flex items-center gap-1.5">
+                <AiPulseDot /> Powered by rule-based analysis — recomputed from the latest approved national data,
+                not a static tip.
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>

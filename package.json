@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "refresh-activity": "tsx scripts/refresh-activity.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

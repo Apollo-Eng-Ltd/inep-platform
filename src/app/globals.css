@@ -252,10 +252,12 @@
   from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: translateY(0); }
 }
-/* Dash pattern marches from source to target along each connector, reading
-   as small pulses flowing in the direction data actually moves. */
+/* A single round "packet" travels from source to target along each
+   connector — pattern is dash 3, gap 500 (total 503), so the dashoffset
+   target below is exactly one full cycle for a seamless loop. Reads as a
+   distinct task moving through the pipeline, not a texture. */
 @keyframes edge-flow {
-  to { stroke-dashoffset: -28; }
+  to { stroke-dashoffset: -503; }
 }
 /* Continuous downward feed for the live activity ticker — the list is
    rendered twice back-to-back and scrolled exactly one copy's height so the

@@ -5,6 +5,7 @@ import { PageHeader, EmptyState } from "@/components/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, SubmitterTypeBadge } from "@/components/badges";
+import { GoalBadge } from "@/components/goal-badge";
 import { one } from "@/lib/rel";
 import { relativeTime } from "@/lib/format";
 import { FilePlus2, FileText } from "lucide-react";
@@ -32,6 +33,7 @@ export default async function SubmissionsPage() {
             : "Your county's plans and progress reports."
         }
       >
+        <GoalBadge goal={6} />
         {!national && (
           <Button render={<Link href="/submissions/new" />}>
             <FilePlus2 className="size-4" /> New submission

@@ -32,6 +32,57 @@ const VERB: Record<AgentName, string> = {
   public_engagement: "drafted a reply for", query: "answered a question for", insight: "refreshed the summary for",
 };
 
+export interface AgentActivitySummary {
+  count: number;
+  /** What the count actually covers — shown next to the number so it's never a mislabeled figure. */
+  windowLabel: string;
+}
+
+async function countActivitySince(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  scopedSubmitterId: string | null,
+  since: string | null
+): Promise<number> {
+  let actionsQuery = supabase
+    .from("agent_actions")
+    .select("id, submission:submissions!inner(submitter_id)", { count: "exact", head: true });
+  let flagsQuery = supabase
+    .from("validation_results")
+    .select("id, submission:submissions!inner(submitter_id)", { count: "exact", head: true });
+  if (since) {
+    actionsQuery = actionsQuery.gte("created_at", since);
+    flagsQuery = flagsQuery.gte("created_at", since);
+  }
+  if (scopedSubmitterId) {
+    actionsQuery = actionsQuery.eq("submission.submitter_id", scopedSubmitterId);
+    flagsQuery = flagsQuery.eq("submission.submitter_id", scopedSubmitterId);
+  }
+  const [{ count: actionCount }, { count: flagCount }] = await Promise.all([actionsQuery, flagsQuery]);
+  return (actionCount ?? 0) + (flagCount ?? 0);
+}
+
+// Real count of agent actions + validation checks logged, scoped the same
+// way the pipeline view is — used by the header's persistent "AI activity"
+// indicator. Widens its window (hour → today → this week → all time) until
+// it finds real logged activity, so a quiet dev/demo database still shows an
+// honest, non-zero, correctly-labeled count instead of a dead "0".
+export async function getRecentAgentActivityCount(profile: Profile): Promise<AgentActivitySummary> {
+  const supabase = await createClient();
+  const scopedSubmitterId = profile.submitter_id;
+  const HOUR = 3600_000;
+  const windows: { since: string | null; label: string }[] = [
+    { since: new Date(Date.now() - HOUR).toISOString(), label: "last hour" },
+    { since: new Date(Date.now() - 24 * HOUR).toISOString(), label: "today" },
+    { since: new Date(Date.now() - 7 * 24 * HOUR).toISOString(), label: "this week" },
+    { since: null, label: "logged" },
+  ];
+  for (const w of windows) {
+    const count = await countActivitySince(supabase, scopedSubmitterId, w.since);
+    if (count > 0) return { count, windowLabel: w.label };
+  }
+  return { count: 0, windowLabel: "last hour" };
+}
+
 export async function getAgentGraphFor(profile: Profile): Promise<AgentGraph> {
   const supabase = await createClient();
   const scopedSubmitterId = profile.submitter_id; // null = national, unscoped

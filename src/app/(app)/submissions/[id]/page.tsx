@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { StatusBadge, SubmitterTypeBadge, SeverityBadge, AgentTag } from "@/components/badges";
+import { GoalBadge } from "@/components/goal-badge";
+import { AiTag } from "@/components/ai-tag";
 import {
   CheckCircle2, AlertTriangle, KanbanSquare, MapPin, FileCheck2, ArrowRight,
 } from "lucide-react";
@@ -23,6 +25,9 @@ export default async function SubmissionDetail({ params }: { params: Promise<{ i
   const { submission, submitter, currentStage, sectors, indicators, values, validation, anomaly, drafting, crossCutting } = result;
   const findings = [...validation, ...anomaly];
   const flaggedSlugs = new Set(findings.map((f) => f.indicatorSlug).filter(Boolean));
+  // Honest, real count: one validation pass + one anomaly pass per reported field.
+  const reportedCount = values.length;
+  const checksRun = reportedCount * 2;
 
   // Only the owning county officer can jump into the editable form; national
   // reviewers land here read-only, so their finding rows stay plain text.
@@ -83,8 +88,16 @@ export default async function SubmissionDetail({ params }: { params: Promise<{ i
               <CardTitle className="text-base flex items-center gap-2">
                 Data checks <AgentTag>validation + anomaly agents</AgentTag>
               </CardTitle>
+              <GoalBadge goal={3} />
             </CardHeader>
             <CardContent className="space-y-2">
+              <p className="text-xs text-muted-foreground -mt-1 mb-1">
+                AI ran <span className="font-semibold text-foreground tabular-nums">{checksRun}</span> automated
+                checks across this submission&apos;s {reportedCount} reported field{reportedCount === 1 ? "" : "s"}{" "}
+                — completeness, units, ranges, duplicates, and year-on-year/peer outliers — and flagged{" "}
+                <span className="font-semibold text-foreground tabular-nums">{findings.length}</span> for review.
+                Every flag is reviewable by a human before it blocks anything.
+              </p>
               {findings.length === 0 ? (
                 <div className="flex items-center gap-2 text-sm text-success bg-success-soft rounded-lg px-3 py-2.5">
                   <CheckCircle2 className="size-4" /> All automated checks passed. No issues found.
@@ -172,10 +185,11 @@ export default async function SubmissionDetail({ params }: { params: Promise<{ i
 
           {/* Draft narrative */}
           <Card>
-            <CardHeader>
+            <CardHeader className="flex-row items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
                 Plan narrative <AgentTag>drafting agent · draft</AgentTag>
               </CardTitle>
+              <AiTag status="generated" />
             </CardHeader>
             <CardContent className="space-y-4">
               {drafting.paragraphs.map((p, i) => (
@@ -235,10 +249,11 @@ export default async function SubmissionDetail({ params }: { params: Promise<{ i
 
           {/* Cross-cutting scorecard */}
           <Card>
-            <CardHeader>
+            <CardHeader className="flex-row items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
-                Cross-cutting <AgentTag>agent</AgentTag>
+                Cross-cutting <AgentTag>cross-cutting agent</AgentTag>
               </CardTitle>
+              <AiTag status="generated" label="Scored by AI" />
             </CardHeader>
             <CardContent className="space-y-4">
               {crossCutting.map((c) => (
@@ -248,6 +263,7 @@ export default async function SubmissionDetail({ params }: { params: Promise<{ i
                     <span className="font-medium tabular-nums">{c.score}</span>
                   </div>
                   <Progress value={c.score} className="h-1.5" />
+                  <p className="text-xs text-muted-foreground">{c.rationale}</p>
                 </div>
               ))}
             </CardContent>

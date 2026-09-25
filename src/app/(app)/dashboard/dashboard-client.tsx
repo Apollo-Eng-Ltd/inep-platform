@@ -11,6 +11,8 @@ import {
 } from "@/components/charts";
 import { HeroStatCard } from "@/components/hero-stat-card";
 import { NationalContextBadge } from "@/components/national-context-badge";
+import { GoalBadgeRow } from "@/components/goal-badge";
+import { LiveTimestamp } from "@/components/ai-tag";
 import { runDashboardInsight, type DashboardInsightChip } from "@/lib/agents";
 import { fmtNum } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -95,6 +97,10 @@ export function DashboardClient({
   const minYear = years[0] ?? new Date().getFullYear();
   const maxYear = years[years.length - 1] ?? new Date().getFullYear();
 
+  // Real render-time stamp for the insight banner's "Updated Xm ago" — this is
+  // literally when this insight instance was computed from the props passed
+  // down from the server, not a fabricated countdown.
+  const [insightGeneratedAt] = useState(() => new Date());
   const [sectorSlug, setSectorSlug] = useState("all");
   const [yearFrom, setYearFrom] = useState(minYear);
   const [yearTo, setYearTo] = useState(maxYear);
@@ -408,7 +414,7 @@ export function DashboardClient({
   return (
     <>
       {/* Header + controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-2">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">National dashboard</h1>
           <span className="rounded-full bg-brand-soft text-brand px-2.5 py-1 text-xs font-medium">
@@ -460,6 +466,7 @@ export function DashboardClient({
           </Button>
         </div>
       </div>
+      <GoalBadgeRow goals={[4, 5]} className="mb-6" />
 
       <Tabs defaultValue="overview">
         <TabsList variant="line" className="mb-4 flex-wrap h-auto">
@@ -482,20 +489,25 @@ export function DashboardClient({
               <div className="size-8 rounded-lg bg-brand/15 text-brand grid place-items-center shrink-0">
                 <Activity className="size-4" />
               </div>
-              <p className="text-sm leading-relaxed pt-1.5">
-                {insight.parts.map((p, i) =>
-                  typeof p === "string" ? (
-                    <span key={i}>{p}</span>
-                  ) : (
-                    <span
-                      key={i}
-                      className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium mx-0.5", chipClasses((p as DashboardInsightChip).tone))}
-                    >
-                      {(p as DashboardInsightChip).label}
-                    </span>
-                  )
-                )}
-              </p>
+              <div>
+                <p className="text-sm leading-relaxed pt-1.5">
+                  {insight.parts.map((p, i) =>
+                    typeof p === "string" ? (
+                      <span key={i}>{p}</span>
+                    ) : (
+                      <span
+                        key={i}
+                        className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium mx-0.5", chipClasses((p as DashboardInsightChip).tone))}
+                      >
+                        {(p as DashboardInsightChip).label}
+                      </span>
+                    )
+                  )}
+                </p>
+                <div className="mt-1.5">
+                  <LiveTimestamp date={insightGeneratedAt} />
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

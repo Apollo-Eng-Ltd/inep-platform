@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/comp
 import { RingProgress } from "@/components/charts";
 import { saveIndicatorValue } from "./actions";
 import { ACCENT_CLASSES, type SectorAccent } from "@/lib/sector-theme";
+import { AiTag } from "@/components/ai-tag";
 import { fmtNum } from "@/lib/format";
 import { ArrowUpRight, ArrowDownRight, AlertTriangle, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -151,7 +152,9 @@ export function SectorWorkspace({
                 <th className="font-medium text-muted-foreground text-xs uppercase tracking-wide px-5 py-3 text-right">
                   Trend
                 </th>
-                <th className="w-10" />
+                <th className="font-medium text-muted-foreground text-xs uppercase tracking-wide px-5 py-3 text-right">
+                  AI check
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -217,21 +220,21 @@ export function SectorWorkspace({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-2 py-2.5">
-                      {flag && (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <button type="button" className="grid place-items-center size-6 text-warning">
-                                <AlertTriangle className="size-4" />
-                              </button>
-                            }
-                          />
-                          <TooltipContent side="left" className="max-w-64">
-                            {flag}
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
+                    <td className="px-5 py-2.5">
+                      <div className="flex justify-end">
+                        {cur == null ? (
+                          <AiTag status="not_checked" />
+                        ) : flag ? (
+                          <Tooltip>
+                            <TooltipTrigger render={<button type="button"><AiTag status="flagged" /></button>} />
+                            <TooltipContent side="left" className="max-w-64">
+                              {flag}
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <AiTag status="checked" />
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

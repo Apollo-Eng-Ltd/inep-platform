@@ -10,6 +10,7 @@ import { one } from "@/lib/rel";
 import { runCountyInsight, type IndicatorTrend } from "@/lib/agents";
 import { getPendingApprovalsFor } from "@/lib/pending-approvals";
 import { PendingApprovalsCard } from "@/components/pending-approvals-card";
+import { AiPulseDot } from "@/components/ai-tag";
 import {
   FilePlus2,
   ArrowRight,
@@ -375,7 +376,13 @@ async function CountyHome({
             <div className="size-8 rounded-lg bg-brand/10 text-brand grid place-items-center shrink-0">
               <Activity className="size-4" />
             </div>
-            <p className="text-sm leading-relaxed pt-1.5">{insight.text}</p>
+            <div>
+              <p className="text-sm leading-relaxed pt-1.5">{insight.text}</p>
+              <p className="text-[11px] text-muted-foreground mt-1.5 inline-flex items-center gap-1.5">
+                <AiPulseDot /> Powered by rule-based analysis — recomputed from this county&apos;s live data, not a
+                static tip.
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>

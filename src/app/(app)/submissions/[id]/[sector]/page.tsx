@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { StepTracker, type StepSector } from "./step-tracker";
 import { SectorWorkspace, type SectorRow } from "./sector-workspace";
 import { SubcountySection, type WardRow } from "./subcounty-section";
+import { GoalBadgeRow } from "@/components/goal-badge";
 import { ArrowRight, Save } from "lucide-react";
 
 // Deterministic 0..1 weight from a stable id — used only to give the
@@ -168,6 +169,7 @@ export default async function SectorFormPage({
         </span>
       </div>
       <p className="text-sm text-muted-foreground mt-1">{submitterName}</p>
+      <GoalBadgeRow goals={[1, 3]} className="mt-2" />
 
       <StepTracker submissionId={id} sectors={stepSectors} currentSlug={currentSector.slug} />
 
